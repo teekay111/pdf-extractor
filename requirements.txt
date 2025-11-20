@@ -1,0 +1,6 @@
+streamlit
+pandas
+pypdf
+google-generativeai
+pywebview
+pyinstaller
