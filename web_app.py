@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
-import pypdf
 import google.generativeai as genai
 import json
 import re
 import time
+import tempfile
+import os
 from io import BytesIO
 
 # ==========================================
@@ -33,17 +34,7 @@ DEFAULT_SCHEMA = [
 # HELPER FUNCTIONS
 # ==========================================
 
-def extract_text_from_pdf(uploaded_file):
-    """Reads text from a Streamlit uploaded file object."""
-    text_content = []
-    try:
-        reader = pypdf.PdfReader(uploaded_file)
-        for page in reader.pages:
-            page_text = page.extract_text() or ""
-            text_content.append(page_text)
-        return "\n".join(text_content)
-    except Exception as e:
-        return f"Error reading PDF: {e}"
+
 
 
 def _clean_json_payload(raw_text):
@@ -55,31 +46,54 @@ def _clean_json_payload(raw_text):
     return payload
 
 
-def analyze_document_with_gemini(filename, text, schema_dict, api_key, model_name):
-    """Sends text to Gemini for extraction."""
-    if not text.strip():
-        return {key: "Error: Empty Document" for key in schema_dict.keys()}
+def generate_gemini_schema(schema_dict):
+    """Converts user schema to Gemini response schema."""
+    properties = {}
+    required = []
+    for col_name, question in schema_dict.items():
+        properties[col_name] = {
+            "type": "STRING",
+            "description": question
+        }
+        required.append(col_name)
+    
+    return {
+        "type": "OBJECT",
+        "properties": properties,
+        "required": required
+    }
 
+
+def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, model_name):
+    """Uploads PDF to Gemini and extracts information."""
     try:
         genai.configure(api_key=api_key)
+        
+        # Upload file to Gemini
+        uploaded_file = genai.upload_file(path=file_path, display_name=filename)
+        
+        # Poll for processing completion
+        while uploaded_file.state.name == "PROCESSING":
+            time.sleep(2)
+            uploaded_file = genai.get_file(uploaded_file.name)
+            
+        if uploaded_file.state.name == "FAILED":
+            raise RuntimeError("Gemini file processing failed.")
+            
+        # Generate schema for structured output
+        schema = generate_gemini_schema(schema_dict)
+        
         model = genai.GenerativeModel(
             model_name=model_name,
-            generation_config={"response_mime_type": "application/json"}
+            generation_config={
+                "response_mime_type": "application/json",
+                "response_schema": schema
+            }
         )
 
-        prompt = f"""
-        Extract the following information from the document text.
-        Return the output strictly as a JSON object.
-        For missing info, use "N/A".
-        
-        FIELDS TO EXTRACT:
-        {json.dumps(schema_dict, indent=2)}
-        
-        DOCUMENT TEXT:
-        {text[:30000]} 
-        """
+        prompt = "Extract the information from the provided document according to the JSON schema. Ensure all fields are populated."
 
-        response = model.generate_content(prompt)
+        response = model.generate_content([uploaded_file, prompt])
         response_payload = _clean_json_payload(getattr(response, "text", "") or "")
         data = json.loads(response_payload)
         data['filename'] = filename
@@ -151,20 +165,25 @@ if st.button("🚀 Start Extraction", type="primary"):
         for i, pdf_file in enumerate(uploaded_files):
             status_text.text(f"Processing {pdf_file.name}...")
             
-            raw_text = extract_text_from_pdf(pdf_file)
+            # Save uploaded file to a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(pdf_file.getvalue())
+                tmp_file_path = tmp_file.name
 
-            if raw_text.startswith("Error reading PDF:"):
-                st.error(f"{pdf_file.name}: {raw_text}")
+            try:
+                extracted_data = analyze_document_with_gemini(
+                    pdf_file.name, tmp_file_path, schema_dict, api_key, model_name
+                )
+                results.append(extracted_data)
+            except Exception as e:
+                st.error(f"Error processing {pdf_file.name}: {e}")
                 error_row = {key: "Extraction Error" for key in schema_dict.keys()}
                 error_row['filename'] = pdf_file.name
                 results.append(error_row)
-                progress_bar.progress((i + 1) / len(uploaded_files))
-                continue
-            
-            extracted_data = analyze_document_with_gemini(
-                pdf_file.name, raw_text, schema_dict, api_key, model_name
-            )
-            results.append(extracted_data)
+            finally:
+                # Clean up the temporary file
+                if os.path.exists(tmp_file_path):
+                    os.remove(tmp_file_path)
             
             progress_bar.progress((i + 1) / len(uploaded_files))
             time.sleep(0.5)
