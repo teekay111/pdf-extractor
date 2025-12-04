@@ -99,21 +99,19 @@ inject_custom_css()
 DEFAULT_MODEL_NAME = "gemini-flash-latest"
 
 NC_COLUMNS = {
-    "NC number": "List every NC number recorded. If more than one exists, separate them with '; '. If none, return 'None'.",
-    "Client name": "List the client name(s) associated with the NCs. Maintain ordering with NC numbers, separate with '; ', and use 'Unknown' if not stated.",
-    "Indicator": "Copy the referenced Indicator in the standard for each NC. Separate multiple entries with '; '.",
+    "NC number": "List every NC number recorded. If none, return 'None'.",
+    "Client name": "List the client name(s) associated with the NCs. Use 'Unknown' if not stated.",
+    "Indicator": "Copy the referenced Indicator in the standard for each NC.",
     "Grade": (
         "State the grade (Major, Minor, Critical, Non-critical, Opportunities for Improvement etc.) for each NC. "
         "If Opportunities for Improvement is mentioned, include it explicitly."
     ),
     "Status": (
-        "Provide the classification/grade for the NC (e.g., Major, Minor, Opportunities for Improvement, "
-        "Non-critical, Critical) using the exact wording in the report. Match ordering with NC numbers "
-        "and separate entries with '; '."
+        "Open or Closed. Open if there is no closed date, closed if there is one."
     ),
-    "Issue Date": "Provide the date each NC was issued. Use ISO format (YYYY-MM-DD) if possible; separate multiples with '; '.",
-    "Closed date": "Provide the date each NC was closed. Leave blank if not available, separate multiples with '; '.",
-    "Scope Definition": "Summarize the scope definition or description for each NC. Separate entries with '; '."
+    "Issue Date": "Provide the date each NC was issued. Use the format (DD-MM-YYYY).",
+    "Closed date": "Provide the date each NC was closed. Use the format (DD-MM-YYYY).",
+    "Scope Definition": "Summarize the scope definition or description for each NC."
 }
 
 DEFAULT_NC_SCHEMA = [
