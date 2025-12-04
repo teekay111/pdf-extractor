@@ -366,118 +366,149 @@ if st.button("🚀 Start Extraction", type="primary"):
             edited_schema.Question.values, index=edited_schema['Column Name']
         ).to_dict()
 
-        results = []
-        nc_results = {section["key"]: [] for section in NC_SECTIONS} if scan_nc else {}
-        nc_schema_dicts = {}
+        results_section = st.container()
+        with results_section:
+            st.subheader("3. Extracted Data")
+            main_table_placeholder = st.empty()
+
+        nc_table_placeholders = {}
         if scan_nc:
-            for section in NC_SECTIONS:
-                df = st.session_state[f"nc_schema_df_{section['key']}"]
-                nc_schema_dicts[section["key"]] = pd.Series(
-                    df.Question.values,
-                    index=df['Column Name']
-                ).to_dict()
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+            nc_section_container = st.container()
+            with nc_section_container:
+                st.subheader("4. Non-Conformities")
+                for section in NC_SECTIONS:
+                    st.markdown(f"**{section['title']}**")
+                    nc_table_placeholders[section["key"]] = st.empty()
 
-        for i, pdf_file in enumerate(uploaded_files):
-            status_text.text(f"Processing {pdf_file.name}...")
-            
-            # Save uploaded file to a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(pdf_file.getvalue())
-                tmp_file_path = tmp_file.name
+        def process_documents():
+            results = []
+            nc_results = {section["key"]: [] for section in NC_SECTIONS} if scan_nc else {}
+            nc_schema_dicts = {}
+            if scan_nc:
+                for section in NC_SECTIONS:
+                    df = st.session_state[f"nc_schema_df_{section['key']}"]
+                    nc_schema_dicts[section["key"]] = pd.Series(
+                        df.Question.values,
+                        index=df['Column Name']
+                    ).to_dict()
+            progress_bar = st.progress(0)
+            status_text = st.empty()
 
-            try:
-                extracted_data = analyze_document_with_gemini(
-                    pdf_file.name, tmp_file_path, schema_dict, API_KEY, MODEL_NAME
-                )
-                results.append(extracted_data)
+            main_table_df = None
+            nc_table_dfs = {section["key"]: None for section in NC_SECTIONS} if scan_nc else {}
 
-                if scan_nc:
-                    for section in NC_SECTIONS:
-                        section_schema = {
-                            col: f"{desc} (Context: {section['title']})."
-                            for col, desc in nc_schema_dicts[section["key"]].items()
-                        }
-                        try:
-                            section_data = analyze_document_with_gemini(
-                                pdf_file.name,
-                                tmp_file_path,
-                                section_schema,
-                                API_KEY,
-                                MODEL_NAME,
-                                extra_instruction=section["instruction"]
-                            )
-                            nc_results[section["key"]].append(section_data)
-                        except Exception as nc_err:
-                            st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
-                            error_row = {
-                                "NC number": "Extraction Error",
-                                "Client name": "Extraction Error",
-                                "filename": pdf_file.name
+            def update_main_table_display():
+                nonlocal main_table_df
+                if not results:
+                    main_table_placeholder.info("Waiting for documents...")
+                    main_table_df = None
+                    return
+                df = pd.DataFrame(results)
+                cols = ['filename'] + [k for k in schema_dict.keys() if k != 'filename']
+                for col in cols:
+                    if col not in df.columns:
+                        df[col] = "N/A"
+                df = df[cols]
+                main_table_placeholder.dataframe(df, use_container_width=True)
+                main_table_df = df
+
+            def update_nc_table_display(section_key):
+                if not scan_nc:
+                    return
+                rows = nc_results.get(section_key, [])
+                placeholder = nc_table_placeholders[section_key]
+                if not rows:
+                    placeholder.info("Waiting for documents...")
+                    nc_table_dfs[section_key] = None
+                    return
+                df = pd.DataFrame(rows)
+                cols = ['filename'] + list(nc_schema_dicts[section_key].keys())
+                for col in cols:
+                    if col not in df.columns:
+                        df[col] = "N/A"
+                df = df[cols]
+                placeholder.dataframe(df, use_container_width=True)
+                nc_table_dfs[section_key] = df
+
+            for i, pdf_file in enumerate(uploaded_files):
+                status_text.text(f"Processing {pdf_file.name}...")
+                
+                # Save uploaded file to a temporary file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                    tmp_file.write(pdf_file.getvalue())
+                    tmp_file_path = tmp_file.name
+
+                try:
+                    extracted_data = analyze_document_with_gemini(
+                        pdf_file.name, tmp_file_path, schema_dict, API_KEY, MODEL_NAME
+                    )
+                    results.append(extracted_data)
+                    update_main_table_display()
+
+                    if scan_nc:
+                        for section in NC_SECTIONS:
+                            section_schema = {
+                                col: f"{desc} (Context: {section['title']})."
+                                for col, desc in nc_schema_dicts[section["key"]].items()
                             }
-                            nc_results[section["key"]].append(error_row)
-            except Exception as e:
-                st.error(f"Error processing {pdf_file.name}: {e}")
-                error_row = {key: "Extraction Error" for key in schema_dict.keys()}
-                error_row['filename'] = pdf_file.name
-                results.append(error_row)
-            finally:
-                # Clean up the temporary file
-                if os.path.exists(tmp_file_path):
-                    os.remove(tmp_file_path)
-            
-            progress_bar.progress((i + 1) / len(uploaded_files))
-            time.sleep(0.5)
+                            try:
+                                section_data = analyze_document_with_gemini(
+                                    pdf_file.name,
+                                    tmp_file_path,
+                                    section_schema,
+                                    API_KEY,
+                                    MODEL_NAME,
+                                    extra_instruction=section["instruction"]
+                                )
+                                nc_results[section["key"]].append(section_data)
+                                update_nc_table_display(section["key"])
+                            except Exception as nc_err:
+                                st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
+                                error_row = {
+                                    "NC number": "Extraction Error",
+                                    "Client name": "Extraction Error",
+                                    "filename": pdf_file.name
+                                }
+                                nc_results[section["key"]].append(error_row)
+                                update_nc_table_display(section["key"])
+                except Exception as e:
+                    st.error(f"Error processing {pdf_file.name}: {e}")
+                    error_row = {key: "Extraction Error" for key in schema_dict.keys()}
+                    error_row['filename'] = pdf_file.name
+                    results.append(error_row)
+                    update_main_table_display()
+                finally:
+                    # Clean up the temporary file
+                    if os.path.exists(tmp_file_path):
+                        os.remove(tmp_file_path)
+                
+                progress_bar.progress((i + 1) / len(uploaded_files))
+                time.sleep(0.5)
 
-        status_text.text("Done!")
-        
-        # --- Results Display ---
-        st.subheader("3. Extracted Data")
-        
-        if results:
-            df = pd.DataFrame(results)
-            
-            cols = ['filename'] + [k for k in schema_dict.keys() if k != 'filename']
-            for col in cols:
-                if col not in df.columns:
-                    df[col] = "N/A"
-            df = df[cols]
-
-            st.dataframe(df, use_container_width=True)
+            status_text.text("Done!")
 
             # --- Export / Save ---
-            csv = df.to_csv(index=False).encode('utf-8')
-            
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name="extracted_data.csv",
-                mime="text/csv",
-            )
-        else:
-            st.warning("No data was extracted.")
+            if main_table_df is not None:
+                csv = main_table_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv,
+                    file_name="extracted_data.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.warning("No data was extracted.")
 
-        if scan_nc:
-            st.subheader("4. Non-Conformities")
-            for section in NC_SECTIONS:
-                st.markdown(f"**{section['title']}**")
-                section_rows = nc_results.get(section["key"], [])
-                if section_rows:
-                    section_df = pd.DataFrame(section_rows)
-                    cols = ['filename'] + list(nc_schema_dicts[section["key"]].keys())
-                    for col in cols:
-                        if col not in section_df.columns:
-                            section_df[col] = "N/A"
-                    section_df = section_df[cols]
-                    st.dataframe(section_df, use_container_width=True)
+            if scan_nc:
+                for section in NC_SECTIONS:
+                    section_df = nc_table_dfs.get(section["key"])
+                    if section_df is not None and not section_df.empty:
+                        csv_data = section_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label=f"📥 Download CSV - {section['title']}",
+                            data=csv_data,
+                            file_name=section["file_name"],
+                            mime="text/csv",
+                        )
 
-                    csv_data = section_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label=f"📥 Download CSV - {section['title']}",
-                        data=csv_data,
-                        file_name=section["file_name"],
-                        mime="text/csv",
-                    )
-                else:
-                    st.info(f"No data extracted for {section['title']}.")
+        process_documents()
