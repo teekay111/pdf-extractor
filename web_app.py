@@ -98,6 +98,57 @@ inject_custom_css()
 
 DEFAULT_MODEL_NAME = "gemini-flash-latest"
 
+NC_COLUMNS = {
+    "NC number": "List every NC number recorded. If more than one exists, separate them with '; '. If none, return 'None'.",
+    "Client name": "List the client name(s) associated with the NCs. Maintain ordering with NC numbers, separate with '; ', and use 'Unknown' if not stated.",
+    "Indicator": "Copy the referenced Indicator in the standard for each NC. Separate multiple entries with '; '.",
+    "Grade": (
+        "State the grade (Major, Minor, Critical, Non-critical, Opportunities for Improvement etc.) for each NC. "
+        "If Opportunities for Improvement is mentioned, include it explicitly."
+    ),
+    "Status": (
+        "Provide the classification/grade for the NC (e.g., Major, Minor, Opportunities for Improvement, "
+        "Non-critical, Critical) using the exact wording in the report. Match ordering with NC numbers "
+        "and separate entries with '; '."
+    ),
+    "Issue Date": "Provide the date each NC was issued. Use ISO format (YYYY-MM-DD) if possible; separate multiples with '; '.",
+    "Closed date": "Provide the date each NC was closed. Leave blank if not available, separate multiples with '; '.",
+    "Scope Definition": "Summarize the scope definition or description for each NC. Separate entries with '; '."
+}
+
+DEFAULT_NC_SCHEMA = [
+    {"Column Name": column, "Question": description}
+    for column, description in NC_COLUMNS.items()
+]
+
+def ensure_nc_schema_states():
+    """Initialize per-section non-conformity schema tables."""
+    for section in NC_SECTIONS:
+        state_key = f"nc_schema_df_{section['key']}"
+        if state_key not in st.session_state:
+            st.session_state[state_key] = pd.DataFrame(DEFAULT_NC_SCHEMA)
+
+NC_SECTIONS = [
+    {
+        "key": "audit_nc",
+        "title": "4.3.1 Non-Conformities Identified during this Audit",
+        "instruction": (
+            "Focus strictly on Section 4.3.1 'Non-Conformities Identified during this Audit'. "
+            "If multiple NCs exist, list them all in order."
+        ),
+        "file_name": "non_conformities_current_audit.csv"
+    },
+    {
+        "key": "previous_nc",
+        "title": "4.3.2 Non-Conformity Identified during the last ASA",
+        "instruction": (
+            "Focus strictly on Section 4.3.2 'Non-Conformity Identified during the last ASA'. "
+            "If multiple NCs exist, list them all in order."
+        ),
+        "file_name": "non_conformities_last_asa.csv"
+    }
+]
+
 def get_configured_api_key():
     """Load the API key from Streamlit secrets or environment variables."""
     secret_key = None
@@ -156,7 +207,7 @@ def generate_gemini_schema(schema_dict):
     }
 
 
-def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, model_name):
+def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, model_name, extra_instruction=None):
     """Uploads PDF to Gemini and extracts information."""
     try:
         genai.configure(api_key=api_key)
@@ -184,6 +235,8 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
         )
 
         prompt = "Extract the information from the provided document according to the JSON schema. Ensure all fields are populated."
+        if extra_instruction:
+            prompt += f" {extra_instruction}"
 
         response = model.generate_content([uploaded_file, prompt])
         response_payload = _clean_json_payload(getattr(response, "text", "") or "")
@@ -258,6 +311,43 @@ edited_schema = st.data_editor(
 # --- Main Area: File Upload ---
 st.subheader("2. Upload Documents")
 uploaded_files = st.file_uploader("Drag and drop PDF files here", type=["pdf"], accept_multiple_files=True)
+scan_nc = st.checkbox("Also scan for non-conformities?", value=False,
+                      help="Runs additional prompts to scan and export data for non-conformities.")
+if scan_nc:
+    ensure_nc_schema_states()
+    st.subheader("Configure Non-Conformity Questions")
+    for section in NC_SECTIONS:
+        state_key = f"nc_schema_df_{section['key']}"
+        st.markdown(f"**{section['title']}**")
+        nc_schema_upload = st.file_uploader(
+            f"Upload schema CSV for {section['title']} (`Column Name`, `Question`)",
+            type=["csv"],
+            key=f"nc_schema_file_uploader_{section['key']}",
+            help="Uploading replaces the table below for this section."
+        )
+        if nc_schema_upload is not None:
+            try:
+                nc_schema_df = pd.read_csv(nc_schema_upload)
+                required_cols = {"Column Name", "Question"}
+                if not required_cols.issubset(nc_schema_df.columns):
+                    st.error("NC schema CSV must include `Column Name` and `Question` columns.")
+                elif nc_schema_df.empty:
+                    st.error("Uploaded NC schema CSV is empty.")
+                else:
+                    st.session_state[state_key] = nc_schema_df[["Column Name", "Question"]]
+                    st.success(f"Updated {section['title']} questions from CSV.")
+            except Exception as nc_upload_err:
+                st.error(f"Failed to read NC schema CSV for {section['title']}: {nc_upload_err}")
+
+        current_nc_df = st.session_state[state_key]
+        edited_nc_df = st.data_editor(
+            current_nc_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"nc_schema_editor_{section['key']}"
+        )
+        st.session_state[state_key] = edited_nc_df
+        st.markdown("---")
 
 # --- Main Area: Execution ---
 if st.button("🚀 Start Extraction", type="primary"):
@@ -267,12 +357,25 @@ if st.button("🚀 Start Extraction", type="primary"):
         st.error("Please upload at least one PDF file.")
     elif edited_schema.empty:
         st.error("Please define at least one question to extract.")
+    elif scan_nc and any(
+        st.session_state[f"nc_schema_df_{section['key']}"].empty for section in NC_SECTIONS
+    ):
+        st.error("Each non-conformity schema must contain at least one row. Update the tables above before continuing.")
     else:
         schema_dict = pd.Series(
             edited_schema.Question.values, index=edited_schema['Column Name']
         ).to_dict()
 
         results = []
+        nc_results = {section["key"]: [] for section in NC_SECTIONS} if scan_nc else {}
+        nc_schema_dicts = {}
+        if scan_nc:
+            for section in NC_SECTIONS:
+                df = st.session_state[f"nc_schema_df_{section['key']}"]
+                nc_schema_dicts[section["key"]] = pd.Series(
+                    df.Question.values,
+                    index=df['Column Name']
+                ).to_dict()
         progress_bar = st.progress(0)
         status_text = st.empty()
 
@@ -289,6 +392,31 @@ if st.button("🚀 Start Extraction", type="primary"):
                     pdf_file.name, tmp_file_path, schema_dict, API_KEY, MODEL_NAME
                 )
                 results.append(extracted_data)
+
+                if scan_nc:
+                    for section in NC_SECTIONS:
+                        section_schema = {
+                            col: f"{desc} (Context: {section['title']})."
+                            for col, desc in nc_schema_dicts[section["key"]].items()
+                        }
+                        try:
+                            section_data = analyze_document_with_gemini(
+                                pdf_file.name,
+                                tmp_file_path,
+                                section_schema,
+                                API_KEY,
+                                MODEL_NAME,
+                                extra_instruction=section["instruction"]
+                            )
+                            nc_results[section["key"]].append(section_data)
+                        except Exception as nc_err:
+                            st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
+                            error_row = {
+                                "NC number": "Extraction Error",
+                                "Client name": "Extraction Error",
+                                "filename": pdf_file.name
+                            }
+                            nc_results[section["key"]].append(error_row)
             except Exception as e:
                 st.error(f"Error processing {pdf_file.name}: {e}")
                 error_row = {key: "Extraction Error" for key in schema_dict.keys()}
@@ -329,3 +457,27 @@ if st.button("🚀 Start Extraction", type="primary"):
             )
         else:
             st.warning("No data was extracted.")
+
+        if scan_nc:
+            st.subheader("4. Non-Conformities")
+            for section in NC_SECTIONS:
+                st.markdown(f"**{section['title']}**")
+                section_rows = nc_results.get(section["key"], [])
+                if section_rows:
+                    section_df = pd.DataFrame(section_rows)
+                    cols = ['filename'] + list(nc_schema_dicts[section["key"]].keys())
+                    for col in cols:
+                        if col not in section_df.columns:
+                            section_df[col] = "N/A"
+                    section_df = section_df[cols]
+                    st.dataframe(section_df, use_container_width=True)
+
+                    csv_data = section_df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label=f"📥 Download CSV - {section['title']}",
+                        data=csv_data,
+                        file_name=section["file_name"],
+                        mime="text/csv",
+                    )
+                else:
+                    st.info(f"No data extracted for {section['title']}.")
