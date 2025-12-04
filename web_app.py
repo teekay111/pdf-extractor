@@ -13,7 +13,99 @@ from io import BytesIO
 # ==========================================
 st.set_page_config(page_title="AI PDF Extractor", page_icon="📄", layout="wide")
 
+def inject_custom_css():
+    st.markdown("""
+        <style>
+        /* Main Background and Text */
+        .stApp {
+            background-color: #FFFFFF;
+            color: #333333;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        
+        /* Sidebar */
+        [data-testid="stSidebar"] {
+            background-color: #F5FAF6; /* Very light green tint */
+            border-right: 1px solid #E0E0E0;
+        }
+        
+        /* Headers */
+        h1, h2, h3 {
+            color: #009CA6; /* ASI Blue-Green / Teal */
+            font-weight: 600;
+        }
+        
+        /* Buttons */
+        .stButton > button {
+            background-color: #009CA6;
+            color: white;
+            border-radius: 4px;
+            border: none;
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+        }
+        .stButton > button:hover {
+            background-color: #007A82; /* Darker teal on hover */
+            color: white;
+            border: none;
+        }
+        
+        /* Inputs */
+        .stTextInput > div > div > input {
+            border-radius: 4px;
+            border: 1px solid #CCCCCC;
+            background-color: #FFFFFF; /* Ensure white background */
+            color: #333333; /* Ensure dark text */
+        }
+        
+        /* Data Editor */
+        [data-testid="stDataFrame"] {
+            border: 1px solid #E0E0E0;
+            border-radius: 4px;
+            background-color: #FFFFFF;
+        }
+        
+        /* Info Box */
+        .stAlert {
+            background-color: #F0F8F5;
+            color: #005C61;
+            border: 1px solid #009CA6;
+        }
+        
+        /* Custom Header Bar */
+        .header-bar {
+            background-color: #009CA6; /* ASI Blue-Green */
+            padding: 2rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            color: white;
+            text-align: center;
+            background-image: linear-gradient(135deg, #009CA6 0%, #007A82 100%);
+        }
+        .header-bar h1 {
+            color: white !important;
+            margin-bottom: 0.5rem;
+        }
+        .header-bar p {
+            font-size: 1.1rem;
+            opacity: 0.95;
+            color: white;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+inject_custom_css()
+
 DEFAULT_MODEL_NAME = "gemini-flash-latest"
+
+def get_configured_api_key():
+    """Load the API key from Streamlit secrets or environment variables."""
+    secret_key = None
+    try:
+        secret_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        secret_key = None
+    return secret_key or os.environ.get("GEMINI_API_KEY")
 
 # Default schema to populate the editor
 DEFAULT_SCHEMA = [
@@ -110,24 +202,48 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
 # APP UI
 # ==========================================
 
-st.title("📄 AI PDF Data Extractor")
-st.markdown("Upload PDFs, define your questions, and let AI convert them into a structured Excel/CSV table.")
+st.markdown("""
+    <div class="header-bar">
+        <h1>📄 AI PDF Data Extractor</h1>
+        <p>Upload PDFs, define your questions, and let AI convert them into a structured Excel/CSV table.</p>
+    </div>
+""", unsafe_allow_html=True)
 
-# --- Sidebar: Settings ---
-with st.sidebar:
-    st.header("⚙️ Settings")
-    api_key = st.text_input("Gemini API Key", type="password", help="Get one at aistudio.google.com")
-    model_name = st.text_input(
-        "Gemini Model",
-        value=DEFAULT_MODEL_NAME,
-        help="Use the full model name, e.g. models/gemini-1.5-flash"
+st.info("💡 The questions you define below determine the columns in your output file.")
+
+API_KEY = get_configured_api_key()
+MODEL_NAME = DEFAULT_MODEL_NAME
+
+if not API_KEY:
+    st.warning(
+        "Set `GEMINI_API_KEY` in Streamlit secrets (`.streamlit/secrets.toml`) or as an environment variable "
+        "before running the extractor."
     )
-    
-    st.info("💡 **Tip:** The questions you define in the main view determine the columns in your output file.")
 
 # --- Main Area: Schema Definition ---
 st.subheader("1. Define your Data Columns")
 st.markdown("Edit the table below to choose what information to extract.")
+
+schema_upload = st.file_uploader(
+    "Optional: Upload a schema CSV (`Column Name`, `Question`)",
+    type=["csv"],
+    key="schema_file_uploader",
+    help="Uploading a CSV will replace the table below."
+)
+
+if schema_upload is not None:
+    try:
+        uploaded_schema = pd.read_csv(schema_upload)
+        required_cols = {"Column Name", "Question"}
+        if not required_cols.issubset(uploaded_schema.columns):
+            st.error("CSV must include `Column Name` and `Question` columns.")
+        elif uploaded_schema.empty:
+            st.error("Uploaded schema CSV is empty.")
+        else:
+            st.session_state.schema_df = uploaded_schema[["Column Name", "Question"]]
+            st.success("Schema table updated from CSV upload.")
+    except Exception as csv_err:
+        st.error(f"Failed to read schema CSV: {csv_err}")
 
 if "schema_df" not in st.session_state:
     st.session_state.schema_df = pd.DataFrame(DEFAULT_SCHEMA)
@@ -145,10 +261,8 @@ uploaded_files = st.file_uploader("Drag and drop PDF files here", type=["pdf"], 
 
 # --- Main Area: Execution ---
 if st.button("🚀 Start Extraction", type="primary"):
-    if not api_key:
-        st.error("Please enter your Gemini API Key in the sidebar.")
-    elif not model_name:
-        st.error("Please enter a Gemini model name in the sidebar.")
+    if not API_KEY:
+        st.error("Missing API key. Configure `GEMINI_API_KEY` via secrets or environment variable.")
     elif not uploaded_files:
         st.error("Please upload at least one PDF file.")
     elif edited_schema.empty:
@@ -172,7 +286,7 @@ if st.button("🚀 Start Extraction", type="primary"):
 
             try:
                 extracted_data = analyze_document_with_gemini(
-                    pdf_file.name, tmp_file_path, schema_dict, api_key, model_name
+                    pdf_file.name, tmp_file_path, schema_dict, API_KEY, MODEL_NAME
                 )
                 results.append(extracted_data)
             except Exception as e:
