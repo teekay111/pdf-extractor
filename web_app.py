@@ -598,6 +598,90 @@ if st.button("🚀 Start Extraction", type="primary"):
                     
                     st.markdown(f'<iframe src="{pdf_src}" width="100%" height="600px"></iframe>', unsafe_allow_html=True)
 
+        @st.dialog("Source Verification", width="large")
+        def show_source_verification(row_data, schema_dict_local, title):
+            st.markdown(f"### {title}")
+            
+            # Find the uploaded file to display
+            target_filename = row_data.get("filename")
+            pdf_file_buffer = None
+            if uploaded_files:
+                for f in uploaded_files:
+                    if f.name == target_filename:
+                        pdf_file_buffer = f
+                        break
+            
+            if not pdf_file_buffer:
+                st.error(f"Could not find PDF file: {target_filename}")
+                return
+
+            # Layout: Left column for fields, Right column for PDF
+            col1, col2 = st.columns([1, 1])
+            
+            selected_field = None
+            
+            with col1:
+                st.markdown("#### Extracted Fields")
+                # Show fields as selectable pills or radio buttons
+                # Filter out metadata keys like filename
+                field_keys = [k for k in row_data.keys() if k != "filename"]
+                
+                # Use a radio button for selection, simpler than pills for now
+                selected_field_key = st.radio(
+                    "Select a field to verify:",
+                    field_keys,
+                    format_func=lambda x: x
+                )
+                
+                if selected_field_key:
+                    st.divider()
+                    val = row_data[selected_field_key]
+                    if isinstance(val, dict):
+                        ans = val.get("answer", "N/A")
+                        quote = val.get("source_quote", "N/A")
+                        page = val.get("page_number", 1)
+                        st.markdown(f"**Answer:** {ans}")
+                        st.info(f"**Source Quote:** \"{quote}\"")
+                        st.markdown(f"**Found on Page:** {page}")
+                        
+                        selected_field = {
+                            "page": page,
+                            "quote": quote
+                        }
+                    else:
+                        st.markdown(f"**Value:** {val}")
+                        st.warning("No source metadata available for this field.")
+                        selected_field = {"page": 1, "quote": ""}
+
+            with col2:
+                if pdf_file_buffer:
+                    base64_pdf = base64.b64encode(pdf_file_buffer.getvalue()).decode('utf-8')
+                    
+                    # Construct PDF URL with page fragment
+                    # Browser PDF viewers usually support #page=N
+                    page_num = selected_field["page"] if selected_field else 1
+                    quote_text = selected_field["quote"] if selected_field else ""
+                    
+                    # Clean quote for URL fragment (simple encoding)
+                    import urllib.parse
+                    quote_fragment = f"#:~:text={urllib.parse.quote(quote_text)}" if quote_text else ""
+                    pdf_src = f"data:application/pdf;base64,{base64_pdf}#page={page_num}{quote_fragment}"
+                    
+                    st.markdown(f'<iframe src="{pdf_src}" width="100%" height="600px"></iframe>', unsafe_allow_html=True)
+
+        def flatten_data(rich_data):
+            """Flattens a list of rich objects into a simple dict list for display."""
+            flat_data = []
+            for item in rich_data:
+                flat_row = {}
+                for k, v in item.items():
+                    if isinstance(v, dict) and "answer" in v:
+                        flat_row[k] = v["answer"]
+                    else:
+                        flat_row[k] = v
+                flat_data.append(flat_row)
+            return flat_data
+
         def process_documents():
             results = []
             nc_results = {section["key"]: [] for section in NC_SECTIONS} if scan_nc else {}
@@ -611,93 +695,16 @@ if st.button("🚀 Start Extraction", type="primary"):
                     ).to_dict()
             progress_bar = st.progress(0)
             status_text = st.empty()
-
-            main_table_df = None
-            nc_table_dfs = {section["key"]: None for section in NC_SECTIONS} if scan_nc else {}
-
-            def flatten_data(rich_data):
-                """Flattens a list of rich objects into a simple dict list for display."""
-                flat_data = []
-                for item in rich_data:
-                    flat_row = {}
-                    for k, v in item.items():
-                        if isinstance(v, dict) and "answer" in v:
-                            flat_row[k] = v["answer"]
-                        else:
-                            flat_row[k] = v
-                    flat_data.append(flat_row)
-                return flat_data
-
-            def update_main_table_display():
-                nonlocal main_table_df
-                if not results:
-                    main_table_placeholder.info("Waiting for documents...")
-                    main_table_df = None
-                    return
-                
-                # Store rich results in session state for the UI to access
-                st.session_state.rich_results_main = results
-                
-                # Flatten for display
-                flat_results = flatten_data(results)
-                df = pd.DataFrame(flat_results)
-                
-                cols = ['filename'] + [k for k in schema_dict.keys() if k != 'filename']
-                for col in cols:
-                    if col not in df.columns:
-                        df[col] = "N/A"
-                df = df[cols]
-                
-                # Enable selection
-                event = main_table_placeholder.dataframe(
-                    df, 
-                    use_container_width=True, 
-                    on_select="rerun", 
-                    selection_mode="single-row",
-                    key="main_table_df"
-                )
-                main_table_df = df
-                
-                # Check for selection
-                if event.selection.rows:
-                    selected_idx = event.selection.rows[0]
-                    show_source_verification(results[selected_idx], schema_dict, "Main Extraction")
-
-            def update_nc_table_display(section_key):
-                if not scan_nc:
-                    return
-                rows = nc_results.get(section_key, [])
-                placeholder = nc_table_placeholders[section_key]
-                if not rows:
-                    placeholder.info("Waiting for documents...")
-                    nc_table_dfs[section_key] = None
-                    return
-                
-                # Store rich results
-                st.session_state[f"rich_results_{section_key}"] = rows
-                
-                flat_rows = flatten_data(rows)
-                df = pd.DataFrame(flat_rows)
-                cols = ['filename'] + list(nc_schema_dicts[section_key].keys())
-                for col in cols:
-                    if col not in df.columns:
-                        df[col] = "N/A"
-                df = df[cols]
-                
-                event = placeholder.dataframe(
-                    df, 
-                    use_container_width=True, 
-                    on_select="rerun", 
-                    selection_mode="single-row",
-                    key=f"nc_table_{section_key}"
-                )
-                nc_table_dfs[section_key] = df
-                
-                if event.selection.rows:
-                    selected_idx = event.selection.rows[0]
-                    # We need the schema for this section to display verifying questions
-                    # nc_schema_dicts[section_key] is {Col: Question}
-                    show_source_verification(rows[selected_idx], nc_schema_dicts[section_key], f"Non-Conformity: {section_key}")
+            
+            # Clear previous results from session state
+            st.session_state.rich_results_main = []
+            st.session_state.schema_dict = schema_dict # Store schema for later use
+            st.session_state.nc_schema_dicts = nc_schema_dicts if scan_nc else {} # Store nc schemas
+            
+            # Initialize NC results in session state
+            if scan_nc:
+                for section in NC_SECTIONS:
+                    st.session_state[f"rich_results_{section['key']}"] = []
 
             for i, pdf_file in enumerate(uploaded_files):
                 status_text.text(f"Processing {pdf_file.name}...")
@@ -713,9 +720,12 @@ if st.button("🚀 Start Extraction", type="primary"):
                         pdf_file.name, tmp_file_path, schema_dict, API_KEY, MODEL_NAME
                     )
                     results.append(extracted_data)
-                    update_main_table_display()
+                    # Update session state immediately
+                    st.session_state.rich_results_main = results
+                    # Force rerun to update table? No, we will rely on reactiveness or manual rerun if needed.
+                    # Actually, we can just rely on the layout below to render it.
 
-                    # 2. Process Non-Conformities (Fix: Indented properly inside loop)
+                    # 2. Process Non-Conformities
                     if scan_nc:
                         for section in NC_SECTIONS:
                             section_schema = {
@@ -749,8 +759,11 @@ if st.button("🚀 Start Extraction", type="primary"):
                                         list(nc_schema_dicts[section["key"]].keys()),
                                         pdf_file.name
                                     )
+                                
+                                # Append and update session state
                                 nc_results[section["key"]].extend(section_data or [])
-                                update_nc_table_display(section["key"])
+                                st.session_state[f"rich_results_{section['key']}"] = nc_results[section["key"]]
+                                
                             except Exception as nc_err:
                                 st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
                                 error_row = {
@@ -758,14 +771,14 @@ if st.button("🚀 Start Extraction", type="primary"):
                                 }
                                 error_row["filename"] = pdf_file.name
                                 nc_results[section["key"]].append(error_row)
-                                update_nc_table_display(section["key"])
+                                st.session_state[f"rich_results_{section['key']}"] = nc_results[section["key"]]
 
                 except Exception as e:
                     st.error(f"Error processing {pdf_file.name}: {e}")
                     error_row = {key: "Extraction Error" for key in schema_dict.keys()}
                     error_row['filename'] = pdf_file.name
                     results.append(error_row)
-                    update_main_table_display()
+                    st.session_state.rich_results_main = results
                 finally:
                     # Clean up the temporary file
                     if os.path.exists(tmp_file_path):
@@ -775,29 +788,95 @@ if st.button("🚀 Start Extraction", type="primary"):
                 time.sleep(0.5)
 
             status_text.text("Done!")
-
-            # --- Export / Save ---
-            if main_table_df is not None:
-                csv = main_table_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download CSV",
-                    data=csv,
-                    file_name="extracted_data.csv",
-                    mime="text/csv",
-                )
-            else:
-                st.warning("No data was extracted.")
-
-            if scan_nc:
-                for section in NC_SECTIONS:
-                    section_df = nc_table_dfs.get(section["key"])
-                    if section_df is not None and not section_df.empty:
-                        csv_data = section_df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label=f"📥 Download CSV - {section['title']}",
-                            data=csv_data,
-                            file_name=section["file_name"],
-                            mime="text/csv",
-                        )
+            st.rerun() # Rerun to render the tables in the main flow
 
         process_documents()
+
+# ==========================================
+# RESULT DISPLAY (runs on every script rerun)
+# ==========================================
+
+# 1. Main Results
+if "rich_results_main" in st.session_state and st.session_state.rich_results_main:
+    st.divider()
+    st.subheader("3. Extracted Data")
+    
+    results = st.session_state.rich_results_main
+    flat_results = flatten_data(results)
+    df = pd.DataFrame(flat_results)
+    
+    # Ensure columns match schema
+    current_schema = st.session_state.get("schema_dict", {})
+    cols = ['filename'] + [k for k in current_schema.keys() if k != 'filename']
+    for col in cols:
+        if col not in df.columns:
+            df[col] = "N/A"
+    df = df[cols] if cols else df
+    
+    event = st.dataframe(
+        df, 
+        use_container_width=True, 
+        on_select="rerun", 
+        selection_mode="single-row",
+        key="main_table_df"
+    )
+    
+    if event.selection.rows:
+        selected_idx = event.selection.rows[0]
+        # Pass the schema dict stored in session
+        show_source_verification(results[selected_idx], st.session_state.get("schema_dict", {}), "Main Extraction")
+
+    # Download Button
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download CSV",
+        data=csv,
+        file_name="extracted_data.csv",
+        mime="text/csv",
+    )
+
+# 2. Non-Conformity Results
+if scan_nc_checked := scan_nc: # check the current widget state
+    st.divider()
+    st.subheader("4. Non-Conformities")
+    
+    # Retrieve schemas from session if available
+    nc_schemas = st.session_state.get("nc_schema_dicts", {})
+    
+    for section in NC_SECTIONS:
+        key = section["key"]
+        res_key = f"rich_results_{key}"
+        if res_key in st.session_state and st.session_state[res_key]:
+            st.markdown(f"**{section['title']}**")
+            
+            nc_rows = st.session_state[res_key]
+            flat_nc = flatten_data(nc_rows)
+            df_nc = pd.DataFrame(flat_nc)
+            
+            # Ensure columns
+            sec_schema = nc_schemas.get(key, {})
+            cols = ['filename'] + list(sec_schema.keys())
+            for col in cols:
+                if col not in df_nc.columns:
+                    df_nc[col] = "N/A"
+            df_nc = df_nc[cols] if cols else df_nc
+            
+            event_nc = st.dataframe(
+                df_nc, 
+                use_container_width=True, 
+                on_select="rerun", 
+                selection_mode="single-row",
+                key=f"nc_table_{key}"
+            )
+            
+            if event_nc.selection.rows:
+                sel_idx = event_nc.selection.rows[0]
+                show_source_verification(nc_rows[sel_idx], sec_schema, f"Non-Conformity: {key}")
+
+            csv_nc = df_nc.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label=f"📥 Download CSV - {section['title']}",
+                data=csv_nc,
+                file_name=section["file_name"],
+                mime="text/csv",
+            )
