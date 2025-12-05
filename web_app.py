@@ -96,7 +96,7 @@ def inject_custom_css():
 
 inject_custom_css()
 
-DEFAULT_MODEL_NAME = "gemini-flash-latest"
+DEFAULT_MODEL_NAME = "gemini-3-pro"
 
 NC_COLUMNS = {
     "NC number": "List every NC number recorded. If none, return 'None'.",
