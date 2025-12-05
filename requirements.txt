@@ -4,3 +4,4 @@ google-generativeai
 pywebview
 pyinstaller
 streamlit-pdf-viewer
+pdfplumber
