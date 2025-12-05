@@ -8,6 +8,7 @@ import tempfile
 import os
 import base64
 from io import BytesIO
+from streamlit_pdf_viewer import pdf_viewer
 
 # ==========================================
 # CONFIGURATION & SETUP
@@ -550,24 +551,17 @@ def show_source_verification(row_data, schema_dict_local, title):
 
     with col2:
         if pdf_file_buffer:
-            base64_pdf = base64.b64encode(pdf_file_buffer.getvalue()).decode('utf-8')
+            # Prepare PDF data
+            binary_data = pdf_file_buffer.getvalue()
             
-            # Construct PDF URL with page fragment
-            # Browser PDF viewers usually support #page=N
+            # Determine page to show
             page_num = selected_field["page"] if selected_field else 1
-            quote_text = selected_field["quote"] if selected_field else ""
             
-            # Clean quote for URL fragment (simple encoding)
-            import urllib.parse
-            quote_fragment = f"#:~:text={urllib.parse.quote(quote_text)}" if quote_text else ""
-            pdf_src = f"data:application/pdf;base64,{base64_pdf}#page={page_num}{quote_fragment}"
-            
-            # Use <embed> which is often more reliable for PDFs than <iframe>
-            pdf_display = f'<embed src="{pdf_src}" width="100%" height="600px" type="application/pdf">'
-            st.markdown(pdf_display, unsafe_allow_html=True)
-            
-            # Fallback link
-            st.markdown(f'<a href="{pdf_src}" target="_blank">Open PDF in new tab</a>', unsafe_allow_html=True)
+            # Use streamlit-pdf-viewer
+            # We enforce rendering only the specific page or starting at it if supported.
+            # pages_to_render takes a list of 1-based page numbers.
+            st.markdown(f"**Viewing Page: {page_num}**")
+            pdf_viewer(input=binary_data, width=700, height=800, pages_to_render=[page_num])
 
 def flatten_data(rich_data):
     """Flattens a list of rich objects into a simple dict list for display."""
