@@ -6,6 +6,7 @@ import re
 import time
 import tempfile
 import os
+import base64
 from io import BytesIO
 
 # ==========================================
@@ -13,31 +14,56 @@ from io import BytesIO
 # ==========================================
 st.set_page_config(page_title="AI PDF Extractor", page_icon="📄", layout="wide")
 
+# Helper to load image as base64
+def get_image_base64(path):
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    return None
+
 def inject_custom_css():
     st.markdown("""
         <style>
         /* Main Background and Text */
         .stApp {
-            background-color: #FFFFFF;
-            color: #333333;
-            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            background-color: #F5F5F5;
+            color: #1D2C30;
+            font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+        }
+
+        /* Top Header Bar */
+        header[data-testid="stHeader"] {
+            background-color: #204855 !important;
+            z-index: 1000;
+        }
+
+        /* Fixed Logo in Top Left */
+        .fixed-logo {
+            position: fixed;
+            top: 0.5rem;
+            left: 1rem;
+            height: 2.5rem;
+            z-index: 999999; /* Ensure it's above the header */
         }
         
-        /* Sidebar */
+        /* Sidebar - Hidden as requested */
         [data-testid="stSidebar"] {
-            background-color: #F5FAF6; /* Very light green tint */
-            border-right: 1px solid #E0E0E0;
+            display: none;
+        }
+        section[data-testid="stSidebar"] {
+            display: none;
         }
         
         /* Headers */
         h1, h2, h3 {
-            color: #009CA6; /* ASI Blue-Green / Teal */
+            color: #204855; /* ASI Dark Teal */
             font-weight: 600;
         }
         
         /* Buttons */
         .stButton > button {
-            background-color: #009CA6;
+            background-color: #204855;
             color: white;
             border-radius: 4px;
             border: none;
@@ -45,7 +71,7 @@ def inject_custom_css():
             font-weight: 500;
         }
         .stButton > button:hover {
-            background-color: #007A82; /* Darker teal on hover */
+            background-color: #325A67; /* ASI Accent */
             color: white;
             border: none;
         }
@@ -54,8 +80,8 @@ def inject_custom_css():
         .stTextInput > div > div > input {
             border-radius: 4px;
             border: 1px solid #CCCCCC;
-            background-color: #FFFFFF; /* Ensure white background */
-            color: #333333; /* Ensure dark text */
+            background-color: #FFFFFF;
+            color: #1D2C30;
         }
         
         /* Data Editor */
@@ -67,29 +93,42 @@ def inject_custom_css():
         
         /* Info Box */
         .stAlert {
-            background-color: #F0F8F5;
-            color: #005C61;
-            border: 1px solid #009CA6;
+            background-color: #E8F1F2;
+            color: #1D2C30;
+            border: 1px solid #204855;
         }
         
         /* Custom Header Bar */
         .header-bar {
-            background-color: #009CA6; /* ASI Blue-Green */
+            background-color: #204855; /* ASI Dark Teal */
             padding: 2rem;
             border-radius: 8px;
             margin-bottom: 2rem;
             color: white;
-            text-align: center;
-            background-image: linear-gradient(135deg, #009CA6 0%, #007A82 100%);
+            text-align: left; /* Changed from center to left for flex layout */
+            background-image: linear-gradient(135deg, #204855 0%, #325A67 100%);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .header-bar img {
+            height: 80px;
+            width: auto;
+            border-radius: 4px;
+        }
+        .header-content {
+            flex: 1;
         }
         .header-bar h1 {
             color: white !important;
             margin-bottom: 0.5rem;
+            margin-top: 0;
         }
         .header-bar p {
             font-size: 1.1rem;
             opacity: 0.95;
             color: white;
+            margin: 0;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -310,10 +349,17 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
 # APP UI
 # ==========================================
 
+logo_b64 = get_image_base64("logo.png")
+logo_html = f'<img src="data:image/png;base64,{logo_b64}" class="fixed-logo">' if logo_b64 else ""
+
+st.markdown(f"{logo_html}", unsafe_allow_html=True)
+
 st.markdown("""
     <div class="header-bar">
-        <h1>📄 AI PDF Data Extractor</h1>
-        <p>Upload PDFs, define your questions, and let AI convert them into a structured Excel/CSV table.</p>
+        <div class="header-content">
+            <h1>ASI Audit Intelligence Platform</h1>
+            <p>Automated analysis of audit reports with structured data export for compliance, reporting, and operational insight.</p>
+        </div>
     </div>
 """, unsafe_allow_html=True)
 
