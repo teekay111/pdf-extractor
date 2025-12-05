@@ -8,6 +8,7 @@ import tempfile
 import os
 import base64
 from io import BytesIO
+import pdfplumber
 from streamlit_pdf_viewer import pdf_viewer
 
 # ==========================================
@@ -556,12 +557,48 @@ def show_source_verification(row_data, schema_dict_local, title):
             
             # Determine page to show
             page_num = selected_field["page"] if selected_field else 1
+            quote_text = selected_field["quote"] if selected_field else ""
             
+            # Extract coordinates for highlighting
+            annotations = []
+            if quote_text and page_num:
+                try:
+                    with pdfplumber.open(BytesIO(binary_data)) as pdf:
+                        # pdfplumber pages are 0-indexed, Gemini is 1-indexed
+                        if 0 <= page_num - 1 < len(pdf.pages):
+                            page = pdf.pages[page_num - 1]
+                            # Search for the quote
+                            words = page.search(quote_text)
+                            if words:
+                                # Start with the first match
+                                # structure: [{'x0': ..., 'top': ..., 'x1': ..., 'bottom': ...}, ...]
+                                # pdf_viewer expects annotations in a specific format or we can overlay basic rectangles
+                                # The streamlit-pdf-viewer expects `annotations` as a list of dictionaries.
+                                # Each dictionary should have: page, x, y, width, height, color
+                                # Note: pdfplumber gives (x0, top, x1, bottom) where (0,0) is top-left usually.
+                                
+                                for w in words:
+                                    annotations.append({
+                                        "page": page_num,
+                                        "x": w["x0"],
+                                        "y": w["top"],
+                                        "width": w["x1"] - w["x0"],
+                                        "height": w["bottom"] - w["top"],
+                                        "color": "yellow",
+                                        "opacity": 0.3
+                                    })
+                except Exception as e:
+                    st.warning(f"Could not highlight text: {e}")
+
             # Use streamlit-pdf-viewer
-            # We enforce rendering only the specific page or starting at it if supported.
-            # pages_to_render takes a list of 1-based page numbers.
             st.markdown(f"**Viewing Page: {page_num}**")
-            pdf_viewer(input=binary_data, width=700, height=800, pages_to_render=[page_num])
+            pdf_viewer(
+                input=binary_data, 
+                width=700, 
+                height=800, 
+                pages_to_render=[page_num],
+                annotations=annotations if annotations else None
+            )
 
 def flatten_data(rich_data):
     """Flattens a list of rich objects into a simple dict list for display."""
