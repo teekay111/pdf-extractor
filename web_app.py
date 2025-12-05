@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
@@ -9,8 +8,6 @@ import tempfile
 import os
 import base64
 from io import BytesIO
-import pdfplumber
-from streamlit_pdf_viewer import pdf_viewer
 
 # ==========================================
 # CONFIGURATION & SETUP
@@ -178,19 +175,8 @@ def expand_nc_rows_from_single(single_entry, column_names, filename):
         return []
     processed = {}
     max_len = 0
-    # Store rich metadata to re-attach later
-    rich_metadata = {} 
-    
     for column in column_names:
-        val_obj = single_entry.get(column, "")
-        # Handle rich object or legacy string
-        if isinstance(val_obj, dict) and "answer" in val_obj:
-            raw_val = str(val_obj["answer"] or "")
-            rich_metadata[column] = val_obj # Keep the full object
-        else:
-            raw_val = str(val_obj or "")
-            rich_metadata[column] = None
-
+        raw_val = str(single_entry.get(column, "") or "")
         if column in NC_SPLIT_COLUMNS:
             segments = [seg.strip() for seg in re.split(r";|\n", raw_val) if seg.strip()]
         else:
@@ -206,17 +192,7 @@ def expand_nc_rows_from_single(single_entry, column_names, filename):
         row = {"filename": filename}
         for column in column_names:
             values = processed[column]
-            answer_val = values[idx] if idx < len(values) else values[-1]
-            
-            # If we had rich metadata, re-wrap the answer with it
-            meta = rich_metadata.get(column)
-            if meta:
-                # Create a shallow copy to avoid reference issues, update answer
-                new_obj = meta.copy()
-                new_obj['answer'] = answer_val
-                row[column] = new_obj
-            else:
-                row[column] = answer_val
+            row[column] = values[idx] if idx < len(values) else values[-1]
         rows.append(row)
     return rows
 
@@ -296,18 +272,13 @@ def _clean_json_payload(raw_text):
 
 
 def generate_gemini_schema(schema_dict, as_array=False):
-    """Converts user schema to Gemini response schema with source verification."""
+    """Converts user schema to Gemini response schema."""
     properties = {}
     required = []
     for col_name, question in schema_dict.items():
         properties[col_name] = {
-            "type": "OBJECT",
-            "properties": {
-                "answer": {"type": "STRING", "description": question},
-                "source_quote": {"type": "STRING", "description": "The exact substring from the text that supports this answer."},
-                "page_number": {"type": "INTEGER", "description": "The page number (1-indexed) where the quote is found."}
-            },
-            "required": ["answer", "source_quote", "page_number"]
+            "type": "STRING",
+            "description": question
         }
         required.append(col_name)
     
@@ -352,15 +323,13 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
             }
         )
 
-        prompt = "Extract the information from the provided document according to the JSON schema. For each field, provide the Answer, the Exact Source Quote from the text, and the Page Number."
+        prompt = "Extract the information from the provided document according to the JSON schema. Ensure all fields are populated."
         if extra_instruction:
             prompt += f" {extra_instruction}"
 
         response = model.generate_content([uploaded_file, prompt])
         response_payload = _clean_json_payload(getattr(response, "text", "") or "")
         data = json.loads(response_payload or "[]")
-        
-        # Add filename to the root object (for list or dict)
         if expect_list:
             if isinstance(data, dict):
                 data = [data]
@@ -370,13 +339,8 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
                 if isinstance(row, dict):
                     row['filename'] = filename
             return data
-            
         if not isinstance(data, dict):
-            # Fallback for unexpected structure
             data = {}
-        
-        # Ensure we keep the structure for Source Verification, but also flatten for main table if needed later.
-        # Ideally, we return the rich object as is.
         data['filename'] = filename
         return data
 
@@ -449,21 +413,7 @@ if "schema_df" not in st.session_state:
 edited_schema = st.data_editor(
     st.session_state.schema_df,
     num_rows="dynamic",
-    use_container_width=True, # Using width="stretch" here might be premature for data_editor, reverting to use_container_width as it's often still supported while deprecated, or let's try just removing it if it causes issues, but standard is use_container_width.
-    # The warning explicitly said replace use_container_width with width='stretch' or width='content'.
-    # Let's try width='stretch' as requested.
-    # Note: st.data_editor signature might differ from dataframe. Let's check docs safely. 
-    # Actually, the user logs show warnings for dataframe. The traceback was about annotations.
-    # Let's apply width="stretch" if possible, but st.data_editor recently might not fully support it in all versions?
-    # The user request said: "For `use_container_width=True`, use `width='stretch'`".
-    # I will replace it.
-    width=None, # data_editor doesn't support 'width' param in the same way as dataframe in some versions? 
-    # Actually, let's stick to use_container_width if width='stretch' is not confirmed for data_editor. 
-    # BUT the user message contained warnings.
-    # Let's try `use_container_width=True` on line 451. Wait, let's look at line 816 where it was used in st.dataframe.
-    # The warning likely came from st.dataframe.
-    # I will stick to fixing st.dataframe first.
-    # The traceback for annotations is the critical one.
+    use_container_width=True,
     key="schema_editor"
 )
 
@@ -509,126 +459,6 @@ if scan_nc:
         st.markdown("---")
 
 # --- Main Area: Execution ---
-
-@st.dialog("Source Verification", width="large")
-def show_source_verification(row_data, schema_dict_local, title):
-    st.markdown(f"### {title}")
-    
-    # Find the uploaded file to display
-    target_filename = row_data.get("filename")
-    pdf_file_buffer = None
-    if uploaded_files:
-        for f in uploaded_files:
-            if f.name == target_filename:
-                pdf_file_buffer = f
-                break
-    
-    if not pdf_file_buffer:
-        st.error(f"Could not find PDF file: {target_filename}")
-        return
-
-    # Layout: Left column for fields, Right column for PDF
-    col1, col2 = st.columns([1, 1])
-    
-    selected_field = None
-    
-    with col1:
-        st.markdown("#### Extracted Fields")
-        # Show fields as selectable pills or radio buttons
-        # Filter out metadata keys like filename
-        field_keys = [k for k in row_data.keys() if k != "filename"]
-        
-        # Use a radio button for selection, simpler than pills for now
-        selected_field_key = st.radio(
-            "Select a field to verify:",
-            field_keys,
-            format_func=lambda x: x
-        )
-        
-        if selected_field_key:
-            st.divider()
-            val = row_data[selected_field_key]
-            if isinstance(val, dict):
-                ans = val.get("answer", "N/A")
-                quote = val.get("source_quote", "N/A")
-                page = val.get("page_number", 1)
-                st.markdown(f"**Answer:** {ans}")
-                st.info(f"**Source Quote:** \"{quote}\"")
-                st.markdown(f"**Found on Page:** {page}")
-                
-                selected_field = {
-                    "page": page,
-                    "quote": quote
-                }
-            else:
-                st.markdown(f"**Value:** {val}")
-                st.warning("No source metadata available for this field.")
-                selected_field = {"page": 1, "quote": ""}
-
-    with col2:
-        if pdf_file_buffer:
-            # Prepare PDF data
-            binary_data = pdf_file_buffer.getvalue()
-            
-            # Determine page to show
-            page_num = selected_field["page"] if selected_field else 1
-            quote_text = selected_field["quote"] if selected_field else ""
-            
-            # Extract coordinates for highlighting
-            annotations = []
-            if quote_text and page_num:
-                try:
-                    with pdfplumber.open(BytesIO(binary_data)) as pdf:
-                        # pdfplumber pages are 0-indexed, Gemini is 1-indexed
-                        if 0 <= page_num - 1 < len(pdf.pages):
-                            page = pdf.pages[page_num - 1]
-                            # Search for the quote
-                            words = page.search(quote_text)
-                            if words:
-                                # Start with the first match
-                                # structure: [{'x0': ..., 'top': ..., 'x1': ..., 'bottom': ...}, ...]
-                                # pdf_viewer expects annotations in a specific format or we can overlay basic rectangles
-                                # The streamlit-pdf-viewer expects `annotations` as a list of dictionaries.
-                                # Each dictionary should have: page, x, y, width, height, color
-                                # Note: pdfplumber gives (x0, top, x1, bottom) where (0,0) is top-left usually.
-                                
-                                for w in words:
-                                    annotations.append({
-                                        "page": page_num,
-                                        "x": w["x0"],
-                                        "y": w["top"],
-                                        "width": w["x1"] - w["x0"],
-                                        "height": w["bottom"] - w["top"],
-                                        "color": "yellow",
-                                        "opacity": 0.3
-                                    })
-                except Exception as e:
-                    st.warning(f"Could not highlight text: {e}")
-
-            # Use streamlit-pdf-viewer
-            st.markdown(f"**Viewing Page: {page_num}**")
-            pdf_viewer(
-                input=binary_data, 
-                width=700, 
-                height=800, 
-                pages_to_render=[page_num],
-                annotations=annotations if annotations else [] 
-            )
-
-def flatten_data(rich_data):
-    """Flattens a list of rich objects into a simple dict list for display."""
-    flat_data = []
-    for item in rich_data:
-        flat_row = {}
-        for k, v in item.items():
-            if isinstance(v, dict) and "answer" in v:
-                flat_row[k] = v["answer"]
-            else:
-                flat_row[k] = v
-        flat_data.append(flat_row)
-    return flat_data
-
-
 if st.button("🚀 Start Extraction", type="primary"):
     if not API_KEY:
         st.error("Missing API key. Configure `GEMINI_API_KEY` via secrets or environment variable.")
@@ -659,83 +489,6 @@ if st.button("🚀 Start Extraction", type="primary"):
                     st.markdown(f"**{section['title']}**")
                     nc_table_placeholders[section["key"]] = st.empty()
 
-        @st.dialog("Source Verification", width="large")
-        def show_source_verification(row_data, schema_dict, title):
-            st.markdown(f"### {title}")
-            
-            # Find the uploaded file to display
-            target_filename = row_data.get("filename")
-            pdf_file_buffer = None
-            for f in uploaded_files:
-                if f.name == target_filename:
-                    pdf_file_buffer = f
-                    break
-            
-            if not pdf_file_buffer:
-                st.error(f"Could not find PDF file: {target_filename}")
-                return
-
-            # Layout: Left column for fields, Right column for PDF
-            col1, col2 = st.columns([1, 1])
-            
-            selected_field = None
-            
-            with col1:
-                st.markdown("#### Extracted Fields")
-                # Show fields as selectable pills or radio buttons
-                # Filter out metadata keys like filename
-                field_keys = [k for k in row_data.keys() if k != "filename"]
-                
-                # Use a radio button for selection, simpler than pills for now
-                selected_field_key = st.radio(
-                    "Select a field to verify:",
-                    field_keys,
-                    format_func=lambda x: x
-                )
-                
-                if selected_field_key:
-                    st.divider()
-                    val = row_data[selected_field_key]
-                    if isinstance(val, dict):
-                        ans = val.get("answer", "N/A")
-                        quote = val.get("source_quote", "N/A")
-                        page = val.get("page_number", 1)
-                        st.markdown(f"**Answer:** {ans}")
-                        st.info(f"**Source Quote:** \"{quote}\"")
-                        st.markdown(f"**Found on Page:** {page}")
-                        
-                        selected_field = {
-                            "page": page,
-                            "quote": quote
-                        }
-                    else:
-                        st.markdown(f"**Value:** {val}")
-                        st.warning("No source metadata available for this field.")
-                        selected_field = {"page": 1, "quote": ""}
-
-            with col2:
-                if pdf_file_buffer:
-                    base64_pdf = base64.b64encode(pdf_file_buffer.getvalue()).decode('utf-8')
-                    
-                    # Construct PDF URL with page fragment
-                    # Browser PDF viewers usually support #page=N
-                    page_num = selected_field["page"] if selected_field else 1
-                    quote_text = selected_field["quote"] if selected_field else ""
-                    
-                    # Basic PDF embedding
-                    # We try to use the browser's native viewer via iframe
-                    # Adding #page=N to data URI might not work in all browsers, 
-                    # but usually works for simple navigation. 
-                    # Text fragment #:~:text= is supported in Chrome/Edge.
-                    
-                    # Clean quote for URL fragment (simple encoding)
-                    import urllib.parse
-                    quote_fragment = f"#:~:text={urllib.parse.quote(quote_text)}" if quote_text else ""
-                    pdf_src = f"data:application/pdf;base64,{base64_pdf}#page={page_num}{quote_fragment}"
-                    
-                    st.markdown(f'<iframe src="{pdf_src}" width="100%" height="600px"></iframe>', unsafe_allow_html=True)
-
-
         def process_documents():
             results = []
             nc_results = {section["key"]: [] for section in NC_SECTIONS} if scan_nc else {}
@@ -749,16 +502,42 @@ if st.button("🚀 Start Extraction", type="primary"):
                     ).to_dict()
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
-            # Clear previous results from session state
-            st.session_state.rich_results_main = []
-            st.session_state.schema_dict = schema_dict # Store schema for later use
-            st.session_state.nc_schema_dicts = nc_schema_dicts if scan_nc else {} # Store nc schemas
-            
-            # Initialize NC results in session state
-            if scan_nc:
-                for section in NC_SECTIONS:
-                    st.session_state[f"rich_results_{section['key']}"] = []
+
+            main_table_df = None
+            nc_table_dfs = {section["key"]: None for section in NC_SECTIONS} if scan_nc else {}
+
+            def update_main_table_display():
+                nonlocal main_table_df
+                if not results:
+                    main_table_placeholder.info("Waiting for documents...")
+                    main_table_df = None
+                    return
+                df = pd.DataFrame(results)
+                cols = ['filename'] + [k for k in schema_dict.keys() if k != 'filename']
+                for col in cols:
+                    if col not in df.columns:
+                        df[col] = "N/A"
+                df = df[cols]
+                main_table_placeholder.dataframe(df, use_container_width=True)
+                main_table_df = df
+
+            def update_nc_table_display(section_key):
+                if not scan_nc:
+                    return
+                rows = nc_results.get(section_key, [])
+                placeholder = nc_table_placeholders[section_key]
+                if not rows:
+                    placeholder.info("Waiting for documents...")
+                    nc_table_dfs[section_key] = None
+                    return
+                df = pd.DataFrame(rows)
+                cols = ['filename'] + list(nc_schema_dicts[section_key].keys())
+                for col in cols:
+                    if col not in df.columns:
+                        df[col] = "N/A"
+                df = df[cols]
+                placeholder.dataframe(df, use_container_width=True)
+                nc_table_dfs[section_key] = df
 
             for i, pdf_file in enumerate(uploaded_files):
                 status_text.text(f"Processing {pdf_file.name}...")
@@ -774,12 +553,9 @@ if st.button("🚀 Start Extraction", type="primary"):
                         pdf_file.name, tmp_file_path, schema_dict, API_KEY, MODEL_NAME
                     )
                     results.append(extracted_data)
-                    # Update session state immediately
-                    st.session_state.rich_results_main = results
-                    # Force rerun to update table? No, we will rely on reactiveness or manual rerun if needed.
-                    # Actually, we can just rely on the layout below to render it.
+                    update_main_table_display()
 
-                    # 2. Process Non-Conformities
+                    # 2. Process Non-Conformities (Fix: Indented properly inside loop)
                     if scan_nc:
                         for section in NC_SECTIONS:
                             section_schema = {
@@ -813,11 +589,8 @@ if st.button("🚀 Start Extraction", type="primary"):
                                         list(nc_schema_dicts[section["key"]].keys()),
                                         pdf_file.name
                                     )
-                                
-                                # Append and update session state
                                 nc_results[section["key"]].extend(section_data or [])
-                                st.session_state[f"rich_results_{section['key']}"] = nc_results[section["key"]]
-                                
+                                update_nc_table_display(section["key"])
                             except Exception as nc_err:
                                 st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
                                 error_row = {
@@ -825,14 +598,14 @@ if st.button("🚀 Start Extraction", type="primary"):
                                 }
                                 error_row["filename"] = pdf_file.name
                                 nc_results[section["key"]].append(error_row)
-                                st.session_state[f"rich_results_{section['key']}"] = nc_results[section["key"]]
+                                update_nc_table_display(section["key"])
 
                 except Exception as e:
                     st.error(f"Error processing {pdf_file.name}: {e}")
                     error_row = {key: "Extraction Error" for key in schema_dict.keys()}
                     error_row['filename'] = pdf_file.name
                     results.append(error_row)
-                    st.session_state.rich_results_main = results
+                    update_main_table_display()
                 finally:
                     # Clean up the temporary file
                     if os.path.exists(tmp_file_path):
@@ -842,95 +615,29 @@ if st.button("🚀 Start Extraction", type="primary"):
                 time.sleep(0.5)
 
             status_text.text("Done!")
-            st.rerun() # Rerun to render the tables in the main flow
+
+            # --- Export / Save ---
+            if main_table_df is not None:
+                csv = main_table_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv,
+                    file_name="extracted_data.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.warning("No data was extracted.")
+
+            if scan_nc:
+                for section in NC_SECTIONS:
+                    section_df = nc_table_dfs.get(section["key"])
+                    if section_df is not None and not section_df.empty:
+                        csv_data = section_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label=f"📥 Download CSV - {section['title']}",
+                            data=csv_data,
+                            file_name=section["file_name"],
+                            mime="text/csv",
+                        )
 
         process_documents()
-
-# ==========================================
-# RESULT DISPLAY (runs on every script rerun)
-# ==========================================
-
-# 1. Main Results
-if "rich_results_main" in st.session_state and st.session_state.rich_results_main:
-    st.divider()
-    st.subheader("3. Extracted Data")
-    
-    results = st.session_state.rich_results_main
-    flat_results = flatten_data(results)
-    df = pd.DataFrame(flat_results)
-    
-    # Ensure columns match schema
-    current_schema = st.session_state.get("schema_dict", {})
-    cols = ['filename'] + [k for k in current_schema.keys() if k != 'filename']
-    for col in cols:
-        if col not in df.columns:
-            df[col] = "N/A"
-    df = df[cols] if cols else df
-    
-    event = st.dataframe(
-        df, 
-        width='stretch', 
-        on_select="rerun", 
-        selection_mode="single-row",
-        key="main_table_df"
-    )
-    
-    if event.selection.rows:
-        selected_idx = event.selection.rows[0]
-        # Pass the schema dict stored in session
-        show_source_verification(results[selected_idx], st.session_state.get("schema_dict", {}), "Main Extraction")
-
-    # Download Button
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download CSV",
-        data=csv,
-        file_name="extracted_data.csv",
-        mime="text/csv",
-    )
-
-# 2. Non-Conformity Results
-if scan_nc_checked := scan_nc: # check the current widget state
-    st.divider()
-    st.subheader("4. Non-Conformities")
-    
-    # Retrieve schemas from session if available
-    nc_schemas = st.session_state.get("nc_schema_dicts", {})
-    
-    for section in NC_SECTIONS:
-        key = section["key"]
-        res_key = f"rich_results_{key}"
-        if res_key in st.session_state and st.session_state[res_key]:
-            st.markdown(f"**{section['title']}**")
-            
-            nc_rows = st.session_state[res_key]
-            flat_nc = flatten_data(nc_rows)
-            df_nc = pd.DataFrame(flat_nc)
-            
-            # Ensure columns
-            sec_schema = nc_schemas.get(key, {})
-            cols = ['filename'] + list(sec_schema.keys())
-            for col in cols:
-                if col not in df_nc.columns:
-                    df_nc[col] = "N/A"
-            df_nc = df_nc[cols] if cols else df_nc
-            
-            event_nc = st.dataframe(
-                df_nc, 
-                width='stretch', 
-                on_select="rerun", 
-                selection_mode="single-row",
-                key=f"nc_table_{key}"
-            )
-            
-            if event_nc.selection.rows:
-                sel_idx = event_nc.selection.rows[0]
-                show_source_verification(nc_rows[sel_idx], sec_schema, f"Non-Conformity: {key}")
-
-            csv_nc = df_nc.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label=f"📥 Download CSV - {section['title']}",
-                data=csv_nc,
-                file_name=section["file_name"],
-                mime="text/csv",
-            )
