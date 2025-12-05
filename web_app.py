@@ -37,6 +37,14 @@ def inject_custom_css():
             background-color: #204855 !important;
             z-index: 1000;
         }
+        /* Top Header Buttons (Deploy, etc.) */
+        header[data-testid="stHeader"] button {
+            color: white !important;
+        }
+        header[data-testid="stHeader"] svg {
+            fill: white !important;
+            color: white !important;
+        }
 
         /* Fixed Logo in Top Left */
         .fixed-logo {
