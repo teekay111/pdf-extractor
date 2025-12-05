@@ -119,6 +119,36 @@ DEFAULT_NC_SCHEMA = [
     for column, description in NC_COLUMNS.items()
 ]
 
+NC_SPLIT_COLUMNS = {"NC number", "Client name", "Indicator", "Grade", "Status", "Issue Date", "Closed date"}
+
+
+def expand_nc_rows_from_single(single_entry, column_names, filename):
+    """Best-effort split of aggregated NC data into multiple rows."""
+    if not single_entry:
+        return []
+    processed = {}
+    max_len = 0
+    for column in column_names:
+        raw_val = str(single_entry.get(column, "") or "")
+        if column in NC_SPLIT_COLUMNS:
+            segments = [seg.strip() for seg in re.split(r";|\n", raw_val) if seg.strip()]
+        else:
+            segments = [raw_val.strip()] if raw_val.strip() else [""]
+        if not segments:
+            segments = [""]
+        processed[column] = segments
+        max_len = max(max_len, len(segments))
+
+    max_len = max(max_len, 1)
+    rows = []
+    for idx in range(max_len):
+        row = {"filename": filename}
+        for column in column_names:
+            values = processed[column]
+            row[column] = values[idx] if idx < len(values) else values[-1]
+        rows.append(row)
+    return rows
+
 def ensure_nc_schema_states():
     """Initialize per-section non-conformity schema tables."""
     for section in NC_SECTIONS:
@@ -130,18 +160,28 @@ NC_SECTIONS = [
     {
         "key": "audit_nc",
         "title": "4.3.1 Non-Conformities Identified during this Audit",
-        "instruction": (
+        "instruction_array": (
             "Focus strictly on Section 4.3.1 'Non-Conformities Identified during this Audit'. "
             "Return a JSON array where each element represents a single non-conformity entry."
+        ),
+        "instruction_fallback": (
+            "Focus strictly on Section 4.3.1 'Non-Conformities Identified during this Audit'. "
+            "Return a JSON object with the requested fields. If multiple NCs exist, list them all in order, "
+            "combining values within each field separated by ';'."
         ),
         "file_name": "non_conformities_current_audit.csv"
     },
     {
         "key": "previous_nc",
         "title": "4.3.2 Non-Conformities Identified during the last ASA",
-        "instruction": (
+        "instruction_array": (
             "Focus strictly on Section 4.3.2 'Non-Conformity Identified during the last ASA'. "
             "Return a JSON array where each element represents a single non-conformity entry."
+        ),
+        "instruction_fallback": (
+            "Focus strictly on Section 4.3.2 'Non-Conformity Identified during the last ASA'. "
+            "Return a JSON object with the requested fields. If multiple NCs exist, list them all in order, "
+            "combining values within each field separated by ';'."
         ),
         "file_name": "non_conformities_last_asa.csv"
     }
@@ -476,9 +516,24 @@ if st.button("🚀 Start Extraction", type="primary"):
                                 section_schema,
                                 API_KEY,
                                 MODEL_NAME,
-                                extra_instruction=section["instruction"],
+                                extra_instruction=section["instruction_array"],
                                 expect_list=True
                             )
+                            if not section_data:
+                                fallback_single = analyze_document_with_gemini(
+                                    pdf_file.name,
+                                    tmp_file_path,
+                                    section_schema,
+                                    API_KEY,
+                                    MODEL_NAME,
+                                    extra_instruction=section["instruction_fallback"],
+                                    expect_list=False
+                                )
+                                section_data = expand_nc_rows_from_single(
+                                    fallback_single,
+                                    list(nc_schema_dicts[section["key"]].keys()),
+                                    pdf_file.name
+                                )
                             nc_results[section["key"]].extend(section_data or [])
                             update_nc_table_display(section["key"])
                         except Exception as nc_err:
