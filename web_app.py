@@ -175,8 +175,19 @@ def expand_nc_rows_from_single(single_entry, column_names, filename):
         return []
     processed = {}
     max_len = 0
+    # Store rich metadata to re-attach later
+    rich_metadata = {} 
+    
     for column in column_names:
-        raw_val = str(single_entry.get(column, "") or "")
+        val_obj = single_entry.get(column, "")
+        # Handle rich object or legacy string
+        if isinstance(val_obj, dict) and "answer" in val_obj:
+            raw_val = str(val_obj["answer"] or "")
+            rich_metadata[column] = val_obj # Keep the full object
+        else:
+            raw_val = str(val_obj or "")
+            rich_metadata[column] = None
+
         if column in NC_SPLIT_COLUMNS:
             segments = [seg.strip() for seg in re.split(r";|\n", raw_val) if seg.strip()]
         else:
@@ -192,7 +203,17 @@ def expand_nc_rows_from_single(single_entry, column_names, filename):
         row = {"filename": filename}
         for column in column_names:
             values = processed[column]
-            row[column] = values[idx] if idx < len(values) else values[-1]
+            answer_val = values[idx] if idx < len(values) else values[-1]
+            
+            # If we had rich metadata, re-wrap the answer with it
+            meta = rich_metadata.get(column)
+            if meta:
+                # Create a shallow copy to avoid reference issues, update answer
+                new_obj = meta.copy()
+                new_obj['answer'] = answer_val
+                row[column] = new_obj
+            else:
+                row[column] = answer_val
         rows.append(row)
     return rows
 
@@ -272,13 +293,18 @@ def _clean_json_payload(raw_text):
 
 
 def generate_gemini_schema(schema_dict, as_array=False):
-    """Converts user schema to Gemini response schema."""
+    """Converts user schema to Gemini response schema with source verification."""
     properties = {}
     required = []
     for col_name, question in schema_dict.items():
         properties[col_name] = {
-            "type": "STRING",
-            "description": question
+            "type": "OBJECT",
+            "properties": {
+                "answer": {"type": "STRING", "description": question},
+                "source_quote": {"type": "STRING", "description": "The exact substring from the text that supports this answer."},
+                "page_number": {"type": "INTEGER", "description": "The page number (1-indexed) where the quote is found."}
+            },
+            "required": ["answer", "source_quote", "page_number"]
         }
         required.append(col_name)
     
@@ -323,13 +349,15 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
             }
         )
 
-        prompt = "Extract the information from the provided document according to the JSON schema. Ensure all fields are populated."
+        prompt = "Extract the information from the provided document according to the JSON schema. For each field, provide the Answer, the Exact Source Quote from the text, and the Page Number."
         if extra_instruction:
             prompt += f" {extra_instruction}"
 
         response = model.generate_content([uploaded_file, prompt])
         response_payload = _clean_json_payload(getattr(response, "text", "") or "")
         data = json.loads(response_payload or "[]")
+        
+        # Add filename to the root object (for list or dict)
         if expect_list:
             if isinstance(data, dict):
                 data = [data]
@@ -339,8 +367,13 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
                 if isinstance(row, dict):
                     row['filename'] = filename
             return data
+            
         if not isinstance(data, dict):
+            # Fallback for unexpected structure
             data = {}
+        
+        # Ensure we keep the structure for Source Verification, but also flatten for main table if needed later.
+        # Ideally, we return the rich object as is.
         data['filename'] = filename
         return data
 
@@ -489,6 +522,82 @@ if st.button("🚀 Start Extraction", type="primary"):
                     st.markdown(f"**{section['title']}**")
                     nc_table_placeholders[section["key"]] = st.empty()
 
+        @st.dialog("Source Verification", width="large")
+        def show_source_verification(row_data, schema_dict, title):
+            st.markdown(f"### {title}")
+            
+            # Find the uploaded file to display
+            target_filename = row_data.get("filename")
+            pdf_file_buffer = None
+            for f in uploaded_files:
+                if f.name == target_filename:
+                    pdf_file_buffer = f
+                    break
+            
+            if not pdf_file_buffer:
+                st.error(f"Could not find PDF file: {target_filename}")
+                return
+
+            # Layout: Left column for fields, Right column for PDF
+            col1, col2 = st.columns([1, 1])
+            
+            selected_field = None
+            
+            with col1:
+                st.markdown("#### Extracted Fields")
+                # Show fields as selectable pills or radio buttons
+                # Filter out metadata keys like filename
+                field_keys = [k for k in row_data.keys() if k != "filename"]
+                
+                # Use a radio button for selection, simpler than pills for now
+                selected_field_key = st.radio(
+                    "Select a field to verify:",
+                    field_keys,
+                    format_func=lambda x: x
+                )
+                
+                if selected_field_key:
+                    st.divider()
+                    val = row_data[selected_field_key]
+                    if isinstance(val, dict):
+                        ans = val.get("answer", "N/A")
+                        quote = val.get("source_quote", "N/A")
+                        page = val.get("page_number", 1)
+                        st.markdown(f"**Answer:** {ans}")
+                        st.info(f"**Source Quote:** \"{quote}\"")
+                        st.markdown(f"**Found on Page:** {page}")
+                        
+                        selected_field = {
+                            "page": page,
+                            "quote": quote
+                        }
+                    else:
+                        st.markdown(f"**Value:** {val}")
+                        st.warning("No source metadata available for this field.")
+                        selected_field = {"page": 1, "quote": ""}
+
+            with col2:
+                if pdf_file_buffer:
+                    base64_pdf = base64.b64encode(pdf_file_buffer.getvalue()).decode('utf-8')
+                    
+                    # Construct PDF URL with page fragment
+                    # Browser PDF viewers usually support #page=N
+                    page_num = selected_field["page"] if selected_field else 1
+                    quote_text = selected_field["quote"] if selected_field else ""
+                    
+                    # Basic PDF embedding
+                    # We try to use the browser's native viewer via iframe
+                    # Adding #page=N to data URI might not work in all browsers, 
+                    # but usually works for simple navigation. 
+                    # Text fragment #:~:text= is supported in Chrome/Edge.
+                    
+                    # Clean quote for URL fragment (simple encoding)
+                    import urllib.parse
+                    quote_fragment = f"#:~:text={urllib.parse.quote(quote_text)}" if quote_text else ""
+                    pdf_src = f"data:application/pdf;base64,{base64_pdf}#page={page_num}{quote_fragment}"
+                    
+                    st.markdown(f'<iframe src="{pdf_src}" width="100%" height="600px"></iframe>', unsafe_allow_html=True)
+
         def process_documents():
             results = []
             nc_results = {section["key"]: [] for section in NC_SECTIONS} if scan_nc else {}
@@ -506,20 +615,53 @@ if st.button("🚀 Start Extraction", type="primary"):
             main_table_df = None
             nc_table_dfs = {section["key"]: None for section in NC_SECTIONS} if scan_nc else {}
 
+            def flatten_data(rich_data):
+                """Flattens a list of rich objects into a simple dict list for display."""
+                flat_data = []
+                for item in rich_data:
+                    flat_row = {}
+                    for k, v in item.items():
+                        if isinstance(v, dict) and "answer" in v:
+                            flat_row[k] = v["answer"]
+                        else:
+                            flat_row[k] = v
+                    flat_data.append(flat_row)
+                return flat_data
+
             def update_main_table_display():
                 nonlocal main_table_df
                 if not results:
                     main_table_placeholder.info("Waiting for documents...")
                     main_table_df = None
                     return
-                df = pd.DataFrame(results)
+                
+                # Store rich results in session state for the UI to access
+                st.session_state.rich_results_main = results
+                
+                # Flatten for display
+                flat_results = flatten_data(results)
+                df = pd.DataFrame(flat_results)
+                
                 cols = ['filename'] + [k for k in schema_dict.keys() if k != 'filename']
                 for col in cols:
                     if col not in df.columns:
                         df[col] = "N/A"
                 df = df[cols]
-                main_table_placeholder.dataframe(df, use_container_width=True)
+                
+                # Enable selection
+                event = main_table_placeholder.dataframe(
+                    df, 
+                    use_container_width=True, 
+                    on_select="rerun", 
+                    selection_mode="single-row",
+                    key="main_table_df"
+                )
                 main_table_df = df
+                
+                # Check for selection
+                if event.selection.rows:
+                    selected_idx = event.selection.rows[0]
+                    show_source_verification(results[selected_idx], schema_dict, "Main Extraction")
 
             def update_nc_table_display(section_key):
                 if not scan_nc:
@@ -530,14 +672,32 @@ if st.button("🚀 Start Extraction", type="primary"):
                     placeholder.info("Waiting for documents...")
                     nc_table_dfs[section_key] = None
                     return
-                df = pd.DataFrame(rows)
+                
+                # Store rich results
+                st.session_state[f"rich_results_{section_key}"] = rows
+                
+                flat_rows = flatten_data(rows)
+                df = pd.DataFrame(flat_rows)
                 cols = ['filename'] + list(nc_schema_dicts[section_key].keys())
                 for col in cols:
                     if col not in df.columns:
                         df[col] = "N/A"
                 df = df[cols]
-                placeholder.dataframe(df, use_container_width=True)
+                
+                event = placeholder.dataframe(
+                    df, 
+                    use_container_width=True, 
+                    on_select="rerun", 
+                    selection_mode="single-row",
+                    key=f"nc_table_{section_key}"
+                )
                 nc_table_dfs[section_key] = df
+                
+                if event.selection.rows:
+                    selected_idx = event.selection.rows[0]
+                    # We need the schema for this section to display verifying questions
+                    # nc_schema_dicts[section_key] is {Col: Question}
+                    show_source_verification(rows[selected_idx], nc_schema_dicts[section_key], f"Non-Conformity: {section_key}")
 
             for i, pdf_file in enumerate(uploaded_files):
                 status_text.text(f"Processing {pdf_file.name}...")
