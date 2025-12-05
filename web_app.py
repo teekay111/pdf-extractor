@@ -132,16 +132,16 @@ NC_SECTIONS = [
         "title": "4.3.1 Non-Conformities Identified during this Audit",
         "instruction": (
             "Focus strictly on Section 4.3.1 'Non-Conformities Identified during this Audit'. "
-            "If multiple NCs exist, list them all in order."
+            "Return a JSON array where each element represents a single non-conformity entry."
         ),
         "file_name": "non_conformities_current_audit.csv"
     },
     {
         "key": "previous_nc",
-        "title": "4.3.2 Non-Conformity Identified during the last ASA",
+        "title": "4.3.2 Non-Conformities Identified during the last ASA",
         "instruction": (
             "Focus strictly on Section 4.3.2 'Non-Conformity Identified during the last ASA'. "
-            "If multiple NCs exist, list them all in order."
+            "Return a JSON array where each element represents a single non-conformity entry."
         ),
         "file_name": "non_conformities_last_asa.csv"
     }
@@ -187,7 +187,7 @@ def _clean_json_payload(raw_text):
     return payload
 
 
-def generate_gemini_schema(schema_dict):
+def generate_gemini_schema(schema_dict, as_array=False):
     """Converts user schema to Gemini response schema."""
     properties = {}
     required = []
@@ -198,14 +198,21 @@ def generate_gemini_schema(schema_dict):
         }
         required.append(col_name)
     
-    return {
+    base_obj = {
         "type": "OBJECT",
         "properties": properties,
         "required": required
     }
+    
+    if as_array:
+        return {
+            "type": "ARRAY",
+            "items": base_obj
+        }
+    return base_obj
 
 
-def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, model_name, extra_instruction=None):
+def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, model_name, extra_instruction=None, expect_list=False):
     """Uploads PDF to Gemini and extracts information."""
     try:
         genai.configure(api_key=api_key)
@@ -222,7 +229,7 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
             raise RuntimeError("Gemini file processing failed.")
             
         # Generate schema for structured output
-        schema = generate_gemini_schema(schema_dict)
+        schema = generate_gemini_schema(schema_dict, as_array=expect_list)
         
         model = genai.GenerativeModel(
             model_name=model_name,
@@ -238,7 +245,18 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
 
         response = model.generate_content([uploaded_file, prompt])
         response_payload = _clean_json_payload(getattr(response, "text", "") or "")
-        data = json.loads(response_payload)
+        data = json.loads(response_payload or "[]")
+        if expect_list:
+            if isinstance(data, dict):
+                data = [data]
+            elif not isinstance(data, list):
+                data = []
+            for row in data:
+                if isinstance(row, dict):
+                    row['filename'] = filename
+            return data
+        if not isinstance(data, dict):
+            data = {}
         data['filename'] = filename
         return data
 
@@ -247,6 +265,8 @@ def analyze_document_with_gemini(filename, file_path, schema_dict, api_key, mode
         err_row = {key: "Extraction Error" for key in schema_dict.keys()}
         err_row['filename'] = filename
         st.error(f"Gemini extraction failed for {filename}: {e}")
+        if expect_list:
+            return [err_row]
         return err_row
 
 # ==========================================
@@ -449,26 +469,26 @@ if st.button("🚀 Start Extraction", type="primary"):
                                 col: f"{desc} (Context: {section['title']})."
                                 for col, desc in nc_schema_dicts[section["key"]].items()
                             }
-                            try:
-                                section_data = analyze_document_with_gemini(
-                                    pdf_file.name,
-                                    tmp_file_path,
-                                    section_schema,
-                                    API_KEY,
-                                    MODEL_NAME,
-                                    extra_instruction=section["instruction"]
-                                )
-                                nc_results[section["key"]].append(section_data)
-                                update_nc_table_display(section["key"])
-                            except Exception as nc_err:
-                                st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
-                                error_row = {
-                                    "NC number": "Extraction Error",
-                                    "Client name": "Extraction Error",
-                                    "filename": pdf_file.name
-                                }
-                                nc_results[section["key"]].append(error_row)
-                                update_nc_table_display(section["key"])
+                        try:
+                            section_data = analyze_document_with_gemini(
+                                pdf_file.name,
+                                tmp_file_path,
+                                section_schema,
+                                API_KEY,
+                                MODEL_NAME,
+                                extra_instruction=section["instruction"],
+                                expect_list=True
+                            )
+                            nc_results[section["key"]].extend(section_data or [])
+                            update_nc_table_display(section["key"])
+                        except Exception as nc_err:
+                            st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
+                            error_row = {
+                                col: "Extraction Error" for col in nc_schema_dicts[section["key"]].keys()
+                            }
+                            error_row["filename"] = pdf_file.name
+                            nc_results[section["key"]].append(error_row)
+                            update_nc_table_display(section["key"])
                 except Exception as e:
                     st.error(f"Error processing {pdf_file.name}: {e}")
                     error_row = {key: "Extraction Error" for key in schema_dict.keys()}
