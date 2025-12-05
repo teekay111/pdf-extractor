@@ -215,9 +215,6 @@ DEFAULT_SCHEMA = [
 # HELPER FUNCTIONS
 # ==========================================
 
-
-
-
 def _clean_json_payload(raw_text):
     """Strip markdown code fences and whitespace before JSON parsing."""
     payload = (raw_text or "").strip()
@@ -497,53 +494,58 @@ if st.button("🚀 Start Extraction", type="primary"):
                     tmp_file_path = tmp_file.name
 
                 try:
+                    # 1. Process Main Schema
                     extracted_data = analyze_document_with_gemini(
                         pdf_file.name, tmp_file_path, schema_dict, API_KEY, MODEL_NAME
                     )
                     results.append(extracted_data)
                     update_main_table_display()
 
+                    # 2. Process Non-Conformities (Fix: Indented properly inside loop)
                     if scan_nc:
                         for section in NC_SECTIONS:
                             section_schema = {
                                 col: f"{desc} (Context: {section['title']})."
                                 for col, desc in nc_schema_dicts[section["key"]].items()
                             }
-                        try:
-                            section_data = analyze_document_with_gemini(
-                                pdf_file.name,
-                                tmp_file_path,
-                                section_schema,
-                                API_KEY,
-                                MODEL_NAME,
-                                extra_instruction=section["instruction_array"],
-                                expect_list=True
-                            )
-                            if not section_data:
-                                fallback_single = analyze_document_with_gemini(
+                            try:
+                                # Attempt array extraction first
+                                section_data = analyze_document_with_gemini(
                                     pdf_file.name,
                                     tmp_file_path,
                                     section_schema,
                                     API_KEY,
                                     MODEL_NAME,
-                                    extra_instruction=section["instruction_fallback"],
-                                    expect_list=False
+                                    extra_instruction=section["instruction_array"],
+                                    expect_list=True
                                 )
-                                section_data = expand_nc_rows_from_single(
-                                    fallback_single,
-                                    list(nc_schema_dicts[section["key"]].keys()),
-                                    pdf_file.name
-                                )
-                            nc_results[section["key"]].extend(section_data or [])
-                            update_nc_table_display(section["key"])
-                        except Exception as nc_err:
-                            st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
-                            error_row = {
-                                col: "Extraction Error" for col in nc_schema_dicts[section["key"]].keys()
-                            }
-                            error_row["filename"] = pdf_file.name
-                            nc_results[section["key"]].append(error_row)
-                            update_nc_table_display(section["key"])
+                                # Fallback if empty or failed
+                                if not section_data:
+                                    fallback_single = analyze_document_with_gemini(
+                                        pdf_file.name,
+                                        tmp_file_path,
+                                        section_schema,
+                                        API_KEY,
+                                        MODEL_NAME,
+                                        extra_instruction=section["instruction_fallback"],
+                                        expect_list=False
+                                    )
+                                    section_data = expand_nc_rows_from_single(
+                                        fallback_single,
+                                        list(nc_schema_dicts[section["key"]].keys()),
+                                        pdf_file.name
+                                    )
+                                nc_results[section["key"]].extend(section_data or [])
+                                update_nc_table_display(section["key"])
+                            except Exception as nc_err:
+                                st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
+                                error_row = {
+                                    col: "Extraction Error" for col in nc_schema_dicts[section["key"]].keys()
+                                }
+                                error_row["filename"] = pdf_file.name
+                                nc_results[section["key"]].append(error_row)
+                                update_nc_table_display(section["key"])
+
                 except Exception as e:
                     st.error(f"Error processing {pdf_file.name}: {e}")
                     error_row = {key: "Extraction Error" for key in schema_dict.keys()}
