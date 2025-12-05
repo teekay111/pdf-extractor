@@ -562,7 +562,12 @@ def show_source_verification(row_data, schema_dict_local, title):
             quote_fragment = f"#:~:text={urllib.parse.quote(quote_text)}" if quote_text else ""
             pdf_src = f"data:application/pdf;base64,{base64_pdf}#page={page_num}{quote_fragment}"
             
-            st.markdown(f'<iframe src="{pdf_src}" width="100%" height="600px"></iframe>', unsafe_allow_html=True)
+            # Use <embed> which is often more reliable for PDFs than <iframe>
+            pdf_display = f'<embed src="{pdf_src}" width="100%" height="600px" type="application/pdf">'
+            st.markdown(pdf_display, unsafe_allow_html=True)
+            
+            # Fallback link
+            st.markdown(f'<a href="{pdf_src}" target="_blank">Open PDF in new tab</a>', unsafe_allow_html=True)
 
 def flatten_data(rich_data):
     """Flattens a list of rich objects into a simple dict list for display."""
