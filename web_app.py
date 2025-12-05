@@ -492,6 +492,92 @@ if scan_nc:
         st.markdown("---")
 
 # --- Main Area: Execution ---
+
+@st.dialog("Source Verification", width="large")
+def show_source_verification(row_data, schema_dict_local, title):
+    st.markdown(f"### {title}")
+    
+    # Find the uploaded file to display
+    target_filename = row_data.get("filename")
+    pdf_file_buffer = None
+    if uploaded_files:
+        for f in uploaded_files:
+            if f.name == target_filename:
+                pdf_file_buffer = f
+                break
+    
+    if not pdf_file_buffer:
+        st.error(f"Could not find PDF file: {target_filename}")
+        return
+
+    # Layout: Left column for fields, Right column for PDF
+    col1, col2 = st.columns([1, 1])
+    
+    selected_field = None
+    
+    with col1:
+        st.markdown("#### Extracted Fields")
+        # Show fields as selectable pills or radio buttons
+        # Filter out metadata keys like filename
+        field_keys = [k for k in row_data.keys() if k != "filename"]
+        
+        # Use a radio button for selection, simpler than pills for now
+        selected_field_key = st.radio(
+            "Select a field to verify:",
+            field_keys,
+            format_func=lambda x: x
+        )
+        
+        if selected_field_key:
+            st.divider()
+            val = row_data[selected_field_key]
+            if isinstance(val, dict):
+                ans = val.get("answer", "N/A")
+                quote = val.get("source_quote", "N/A")
+                page = val.get("page_number", 1)
+                st.markdown(f"**Answer:** {ans}")
+                st.info(f"**Source Quote:** \"{quote}\"")
+                st.markdown(f"**Found on Page:** {page}")
+                
+                selected_field = {
+                    "page": page,
+                    "quote": quote
+                }
+            else:
+                st.markdown(f"**Value:** {val}")
+                st.warning("No source metadata available for this field.")
+                selected_field = {"page": 1, "quote": ""}
+
+    with col2:
+        if pdf_file_buffer:
+            base64_pdf = base64.b64encode(pdf_file_buffer.getvalue()).decode('utf-8')
+            
+            # Construct PDF URL with page fragment
+            # Browser PDF viewers usually support #page=N
+            page_num = selected_field["page"] if selected_field else 1
+            quote_text = selected_field["quote"] if selected_field else ""
+            
+            # Clean quote for URL fragment (simple encoding)
+            import urllib.parse
+            quote_fragment = f"#:~:text={urllib.parse.quote(quote_text)}" if quote_text else ""
+            pdf_src = f"data:application/pdf;base64,{base64_pdf}#page={page_num}{quote_fragment}"
+            
+            st.markdown(f'<iframe src="{pdf_src}" width="100%" height="600px"></iframe>', unsafe_allow_html=True)
+
+def flatten_data(rich_data):
+    """Flattens a list of rich objects into a simple dict list for display."""
+    flat_data = []
+    for item in rich_data:
+        flat_row = {}
+        for k, v in item.items():
+            if isinstance(v, dict) and "answer" in v:
+                flat_row[k] = v["answer"]
+            else:
+                flat_row[k] = v
+        flat_data.append(flat_row)
+    return flat_data
+
+
 if st.button("🚀 Start Extraction", type="primary"):
     if not API_KEY:
         st.error("Missing API key. Configure `GEMINI_API_KEY` via secrets or environment variable.")
@@ -598,89 +684,6 @@ if st.button("🚀 Start Extraction", type="primary"):
                     
                     st.markdown(f'<iframe src="{pdf_src}" width="100%" height="600px"></iframe>', unsafe_allow_html=True)
 
-        @st.dialog("Source Verification", width="large")
-        def show_source_verification(row_data, schema_dict_local, title):
-            st.markdown(f"### {title}")
-            
-            # Find the uploaded file to display
-            target_filename = row_data.get("filename")
-            pdf_file_buffer = None
-            if uploaded_files:
-                for f in uploaded_files:
-                    if f.name == target_filename:
-                        pdf_file_buffer = f
-                        break
-            
-            if not pdf_file_buffer:
-                st.error(f"Could not find PDF file: {target_filename}")
-                return
-
-            # Layout: Left column for fields, Right column for PDF
-            col1, col2 = st.columns([1, 1])
-            
-            selected_field = None
-            
-            with col1:
-                st.markdown("#### Extracted Fields")
-                # Show fields as selectable pills or radio buttons
-                # Filter out metadata keys like filename
-                field_keys = [k for k in row_data.keys() if k != "filename"]
-                
-                # Use a radio button for selection, simpler than pills for now
-                selected_field_key = st.radio(
-                    "Select a field to verify:",
-                    field_keys,
-                    format_func=lambda x: x
-                )
-                
-                if selected_field_key:
-                    st.divider()
-                    val = row_data[selected_field_key]
-                    if isinstance(val, dict):
-                        ans = val.get("answer", "N/A")
-                        quote = val.get("source_quote", "N/A")
-                        page = val.get("page_number", 1)
-                        st.markdown(f"**Answer:** {ans}")
-                        st.info(f"**Source Quote:** \"{quote}\"")
-                        st.markdown(f"**Found on Page:** {page}")
-                        
-                        selected_field = {
-                            "page": page,
-                            "quote": quote
-                        }
-                    else:
-                        st.markdown(f"**Value:** {val}")
-                        st.warning("No source metadata available for this field.")
-                        selected_field = {"page": 1, "quote": ""}
-
-            with col2:
-                if pdf_file_buffer:
-                    base64_pdf = base64.b64encode(pdf_file_buffer.getvalue()).decode('utf-8')
-                    
-                    # Construct PDF URL with page fragment
-                    # Browser PDF viewers usually support #page=N
-                    page_num = selected_field["page"] if selected_field else 1
-                    quote_text = selected_field["quote"] if selected_field else ""
-                    
-                    # Clean quote for URL fragment (simple encoding)
-                    import urllib.parse
-                    quote_fragment = f"#:~:text={urllib.parse.quote(quote_text)}" if quote_text else ""
-                    pdf_src = f"data:application/pdf;base64,{base64_pdf}#page={page_num}{quote_fragment}"
-                    
-                    st.markdown(f'<iframe src="{pdf_src}" width="100%" height="600px"></iframe>', unsafe_allow_html=True)
-
-        def flatten_data(rich_data):
-            """Flattens a list of rich objects into a simple dict list for display."""
-            flat_data = []
-            for item in rich_data:
-                flat_row = {}
-                for k, v in item.items():
-                    if isinstance(v, dict) and "answer" in v:
-                        flat_row[k] = v["answer"]
-                    else:
-                        flat_row[k] = v
-                flat_data.append(flat_row)
-            return flat_data
 
         def process_documents():
             results = []
@@ -815,7 +818,7 @@ if "rich_results_main" in st.session_state and st.session_state.rich_results_mai
     
     event = st.dataframe(
         df, 
-        use_container_width=True, 
+        width='stretch', 
         on_select="rerun", 
         selection_mode="single-row",
         key="main_table_df"
@@ -863,7 +866,7 @@ if scan_nc_checked := scan_nc: # check the current widget state
             
             event_nc = st.dataframe(
                 df_nc, 
-                use_container_width=True, 
+                width='stretch', 
                 on_select="rerun", 
                 selection_mode="single-row",
                 key=f"nc_table_{key}"
