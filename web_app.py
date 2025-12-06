@@ -568,7 +568,9 @@ def show_source_verification(row_data, schema_dict_local, title):
                         if 0 <= page_num - 1 < len(pdf.pages):
                             page = pdf.pages[page_num - 1]
                             # Search for the quote
-                            words = page.search(quote_text)
+                            # Use regex to handle potential newline/whitespace differences
+                            clean_quote = re.sub(r'\s+', r'\\s+', re.escape(quote_text.strip()))
+                            words = page.search(clean_quote, regex=True)
                             if words:
                                 # Start with the first match
                                 # structure: [{'x0': ..., 'top': ..., 'x1': ..., 'bottom': ...}, ...]
@@ -595,7 +597,7 @@ def show_source_verification(row_data, schema_dict_local, title):
             st.markdown(f"**Viewing Page: {page_num}**")
             pdf_viewer(
                 input=binary_data, 
-                width=700, 
+                # width=700, # Removed to allow full width
                 height=800, 
                 pages_to_render=[page_num],
                 annotations=annotations if annotations else [] 
