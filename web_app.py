@@ -802,6 +802,18 @@ if st.button("🚀 Start Extraction", type="primary"):
             if scan_nc:
                 for section in NC_SECTIONS:
                     st.session_state[f"rich_results_{section['key']}"] = []
+            
+            # Placeholders for live updates
+            st.divider()
+            st.subheader("3. Extracted Data")
+            main_table_placeholder = st.empty()
+            
+            nc_placeholders = {}
+            if scan_nc:
+                st.divider()
+                st.subheader("4. Non-Conformities")
+                for section in NC_SECTIONS:
+                    nc_placeholders[section['key']] = st.empty()
 
             for i, pdf_file in enumerate(uploaded_files):
                 status_text.text(f"Processing {pdf_file.name}...")
@@ -821,6 +833,22 @@ if st.button("🚀 Start Extraction", type="primary"):
                     st.session_state.rich_results_main = results
                     # Force rerun to update table? No, we will rely on reactiveness or manual rerun if needed.
                     # Actually, we can just rely on the layout below to render it.
+                    
+                    # LIVE UPDATE MAIN TABLE
+                    flat_results_live = flatten_data(results)
+                    df_live = pd.DataFrame(flat_results_live)
+                    cols_live = ['filename'] + [k for k in schema_dict.keys() if k != 'filename']
+                    for col in cols_live:
+                         if col not in df_live.columns:
+                             df_live[col] = "N/A"
+                    df_live = df_live[cols_live] if cols_live else df_live
+                    df_live.index.name = "Source #"
+                    
+                    main_table_placeholder.dataframe(
+                        df_live,
+                        use_container_width=True,
+                        hide_index=False
+                    )
 
                     # 2. Process Non-Conformities
                     if scan_nc:
@@ -859,7 +887,27 @@ if st.button("🚀 Start Extraction", type="primary"):
                                 
                                 # Append and update session state
                                 nc_results[section["key"]].extend(section_data or [])
+                                nc_results[section["key"]].extend(section_data or [])
                                 st.session_state[f"rich_results_{section['key']}"] = nc_results[section["key"]]
+
+                                # LIVE UPDATE NC TABLE (Success Case)
+                                nc_rows_live = nc_results[section["key"]]
+                                flat_nc_live = flatten_data(nc_rows_live)
+                                df_nc_live = pd.DataFrame(flat_nc_live)
+                                
+                                sec_schema_live = nc_schema_dicts[section["key"]]
+                                cols_nc_live = ['filename'] + list(sec_schema_live.keys())
+                                for col in cols_nc_live:
+                                    if col not in df_nc_live.columns:
+                                        df_nc_live[col] = "N/A"
+                                df_nc_live = df_nc_live[cols_nc_live] if cols_nc_live else df_nc_live
+                                df_nc_live.index.name = "Source #"
+                                
+                                if section['key'] in nc_placeholders:
+                                     with nc_placeholders[section['key']].container():
+                                         st.markdown(f"**{section['title']}**")
+                                         st.caption("**Sources**")
+                                         st.dataframe(df_nc_live, use_container_width=True, hide_index=False)
                                 
                             except Exception as nc_err:
                                 st.error(f"Error processing non-conformities for {pdf_file.name} ({section['title']}): {nc_err}")
@@ -868,7 +916,34 @@ if st.button("🚀 Start Extraction", type="primary"):
                                 }
                                 error_row["filename"] = pdf_file.name
                                 nc_results[section["key"]].append(error_row)
+                                nc_results[section["key"]].append(error_row)
                                 st.session_state[f"rich_results_{section['key']}"] = nc_results[section["key"]]
+                                
+                                # LIVE UPDATE NC TABLE
+                                nc_rows_live = nc_results[section["key"]]
+                                flat_nc_live = flatten_data(nc_rows_live)
+                                df_nc_live = pd.DataFrame(flat_nc_live)
+                                
+                                sec_schema_live = nc_schema_dicts[section["key"]]
+                                cols_nc_live = ['filename'] + list(sec_schema_live.keys())
+                                for col in cols_nc_live:
+                                    if col not in df_nc_live.columns:
+                                        df_nc_live[col] = "N/A"
+                                df_nc_live = df_nc_live[cols_nc_live] if cols_nc_live else df_nc_live
+                                df_nc_live.index.name = "Source #"
+                                
+                                if section['key'] in nc_placeholders:
+                                     # We need to render the title if not already rendered? 
+                                     # Actually we rendered subheader "4. Non-Conformities"
+                                     # And we can render subsection titles using markdown inside the placeholder?
+                                     # No, placeholder replaces content.
+                                     # We should have created a container for each section.
+                                     # Simplified: Just render the dataframe. The user knows the order.
+                                     # Or: Write "**Title**" + DataFrame every time.
+                                     with nc_placeholders[section['key']].container():
+                                         st.markdown(f"**{section['title']}**")
+                                         st.caption("**Sources**")
+                                         st.dataframe(df_nc_live, use_container_width=True, hide_index=False)
 
                 except Exception as e:
                     st.error(f"Error processing {pdf_file.name}: {e}")
