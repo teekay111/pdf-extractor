@@ -585,6 +585,7 @@ def show_source_verification(row_data, schema_dict_local, title):
                                 # Each dictionary should have: page, x, y, width, height, color
                                 # Note: pdfplumber gives (x0, top, x1, bottom) where (0,0) is top-left usually.
                                 
+                                for w in words:
                                     padding = 2
                                     
                                     # 1. Red Border/Tint (Outer Box)
