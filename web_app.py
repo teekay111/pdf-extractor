@@ -916,10 +916,14 @@ if "rich_results_main" in st.session_state and st.session_state.rich_results_mai
             df[col] = "N/A"
     df = df[cols] if cols else df
     
-    st.caption("**Sources**")
+    # User requested "Sources" title next to filename. 
+    # We use the Index column for this purpose.
+    df.index.name = "Sources"
+    
     event = st.dataframe(
         df, 
         use_container_width=True, 
+        hide_index=False,
         on_select="rerun", 
         selection_mode="single-row",
         key="main_table_df"
@@ -970,10 +974,12 @@ if scan_nc_checked := scan_nc: # check the current widget state
                     df_nc[col] = "N/A"
             df_nc = df_nc[cols] if cols else df_nc
             
-            st.caption("**Sources**")
+            df_nc.index.name = "Sources"
+            
             event_nc = st.dataframe(
                 df_nc, 
                 use_container_width=True, 
+                hide_index=False,
                 on_select="rerun", 
                 selection_mode="single-row",
                 key=f"nc_table_{key}"
