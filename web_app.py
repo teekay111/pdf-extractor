@@ -581,9 +581,30 @@ def show_source_verification(row_data, schema_dict_local, title):
                                 except Exception:
                                     pass # Fallback if invalid regex
 
-                            # Fallback 1: Simple case-insensitive string search (if regex found nothing or failed)
+                                except Exception:
+                                    pass # Fallback if invalid regex
+
+                            # Fallback 1: Simple case-insensitive string search
                             if not words:
                                 words = page.search(clean_quote_str, case=False)
+                            
+                            # Fallback 2: "Nuclear" option - Character-by-character regex with loose spacing
+                            # Use this for very messy PDFs where spaces vary wildly between chars
+                            if not words:
+                                try:
+                                    # Escape every char, join with "any whitespace or noise" regex
+                                    # We use \s* for optional whitespace.
+                                    # For even messier text, r'.{0,1}' could be used but risks false positives.
+                                    chars = [re.escape(c) for c in clean_quote_str if c.strip()]
+                                    nuclear_pattern = r'\s*'.join(chars)
+                                    words = page.search(nuclear_pattern, regex=True, case=False)
+                                except Exception:
+                                    pass
+
+                            if not words:
+                                # DEBUG: Show what text pdfplumber actually sees
+                                with st.expander("Debug: Could not find quote in text. View extracted text for this page:"):
+                                    st.text(page.extract_text())
                                 
                             if words:
                                 # Start with the first match
