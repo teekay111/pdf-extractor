@@ -578,13 +578,14 @@ def show_source_verification(row_data, schema_dict_local, title):
                                 # Note: pdfplumber gives (x0, top, x1, bottom) where (0,0) is top-left usually.
                                 
                                 for w in words:
+                                    padding = 2
                                     annotations.append({
                                         "page": page_num,
-                                        "x": w["x0"],
-                                        "y": w["top"],
-                                        "width": w["x1"] - w["x0"],
-                                        "height": w["bottom"] - w["top"],
-                                        "color": "yellow",
+                                        "x": w["x0"] - padding,
+                                        "y": w["top"] - padding,
+                                        "width": (w["x1"] - w["x0"]) + (2 * padding),
+                                        "height": (w["bottom"] - w["top"]) + (2 * padding),
+                                        "color": "red",
                                         "opacity": 0.3
                                     })
                 except Exception as e:
