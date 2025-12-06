@@ -670,11 +670,12 @@ def flatten_data(rich_data):
         flat_data.append(flat_row)
     return flat_data
 
+# --- Main Execution ---
 
-if st.button("🚀 Start Extraction", type="primary"):
-    if not API_KEY:
-        st.error("Missing API key. Configure `GEMINI_API_KEY` via secrets or environment variable.")
-    elif not uploaded_files:
+st.info("💡 **Tip:** To verify the sources for a specific output, click the checkbox in the corresponding row.")
+
+if st.button("🚀 Start Extraction", type="primary", use_container_width=True):
+    if not uploaded_files:
         st.error("Please upload at least one PDF file.")
     elif edited_schema.empty:
         st.error("Please define at least one question to extract.")
