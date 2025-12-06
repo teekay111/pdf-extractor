@@ -567,13 +567,21 @@ def show_source_verification(row_data, schema_dict_local, title):
                         # pdfplumber pages are 0-indexed, Gemini is 1-indexed
                         if 0 <= page_num - 1 < len(pdf.pages):
                             page = pdf.pages[page_num - 1]
-                            # Strategy 1: Flexible Regex (Words + Whitespace + Case Insensitive)
+                            # Alphanumeric Token Search (Robust Strategy)
                             clean_quote_str = quote_text.strip()
-                            # Escape words but allow flexible whitespace
-                            pattern = r'\s+'.join(re.escape(word) for word in clean_quote_str.split())
-                            words = page.search(pattern, regex=True, case=False)
+                            # 1. Extract only alphanumeric tokens, ignoring all punctuation and whitespace initially
+                            tokens = re.findall(r'\w+', clean_quote_str)
                             
-                            # Strategy 2: Fallback to simple string exact match (Case Insensitive)
+                            if tokens:
+                                # 2. Construct regex: token + [anything not alphanumeric]* + token...
+                                # This matches "Word1, Word2" against "Word1,  Word2", "Word1 - Word2", etc.
+                                pattern = r'[^\w]+'.join(re.escape(t) for t in tokens)
+                                try:
+                                    words = page.search(pattern, regex=True, case=False)
+                                except Exception:
+                                    pass # Fallback if invalid regex
+
+                            # Fallback 1: Simple case-insensitive string search (if regex found nothing or failed)
                             if not words:
                                 words = page.search(clean_quote_str, case=False)
                                 
