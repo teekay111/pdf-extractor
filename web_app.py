@@ -674,7 +674,7 @@ def flatten_data(rich_data):
 
 st.info("💡 **Tip:** To verify the sources for a specific output, click the checkbox in the corresponding row.")
 
-if st.button("🚀 Start Extraction", type="primary", use_container_width=True):
+if st.button("🚀 Start Extraction", type="primary"):
     if not uploaded_files:
         st.error("Please upload at least one PDF file.")
     elif edited_schema.empty:
