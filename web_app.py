@@ -587,6 +587,19 @@ def show_source_verification(row_data, schema_dict_local, title):
                                 
                                 for w in words:
                                     padding = 2
+                                    
+                                    # 1. Yellow Highlight (Inner Text) - No padding
+                                    annotations.append({
+                                        "page": page_num,
+                                        "x": w["x0"],
+                                        "y": w["top"],
+                                        "width": w["x1"] - w["x0"],
+                                        "height": w["bottom"] - w["top"],
+                                        "color": "yellow",
+                                        "opacity": 0.5
+                                    })
+                                    
+                                    # 2. Red Surround (Outer Box) - With padding
                                     annotations.append({
                                         "page": page_num,
                                         "x": w["x0"] - padding,
@@ -594,7 +607,7 @@ def show_source_verification(row_data, schema_dict_local, title):
                                         "width": (w["x1"] - w["x0"]) + (2 * padding),
                                         "height": (w["bottom"] - w["top"]) + (2 * padding),
                                         "color": "red",
-                                        "opacity": 0.3
+                                        "opacity": 0.2
                                     })
                 except Exception as e:
                     st.warning(f"Could not highlight text: {e}")
