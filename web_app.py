@@ -448,7 +448,7 @@ if "schema_df" not in st.session_state:
 edited_schema = st.data_editor(
     st.session_state.schema_df,
     num_rows="dynamic",
-    width="stretch",
+    use_container_width=True,
     key="schema_editor"
 )
 
@@ -487,7 +487,7 @@ if scan_nc:
         edited_nc_df = st.data_editor(
             current_nc_df,
             num_rows="dynamic",
-            width="stretch",
+            use_container_width=True,
             key=f"nc_schema_editor_{section['key']}"
         )
         st.session_state[state_key] = edited_nc_df
@@ -854,7 +854,7 @@ if "rich_results_main" in st.session_state and st.session_state.rich_results_mai
     
     event = st.dataframe(
         df, 
-        width='stretch', 
+        use_container_width=True, 
         on_select="rerun", 
         selection_mode="single-row",
         key="main_table_df"
@@ -902,7 +902,7 @@ if scan_nc_checked := scan_nc: # check the current widget state
             
             event_nc = st.dataframe(
                 df_nc, 
-                width='stretch', 
+                use_container_width=True, 
                 on_select="rerun", 
                 selection_mode="single-row",
                 key=f"nc_table_{key}"
