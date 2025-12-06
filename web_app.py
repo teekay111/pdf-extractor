@@ -988,7 +988,12 @@ if scan_nc_checked := scan_nc: # check the current widget state
                 data=csv_nc,
                 file_name=section["file_name"],
                 mime="text/csv",
+                key=f"download_csv_{section['key']}"
             )
+
+# Explicitly trigger the dialog if pending args exist
+if pending_dialog_args:
+    show_source_verification(*pending_dialog_args)
 
 # Final step: Open the dialog if we have a pending request
 if pending_dialog_args:
