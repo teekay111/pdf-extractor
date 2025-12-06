@@ -916,6 +916,7 @@ if "rich_results_main" in st.session_state and st.session_state.rich_results_mai
             df[col] = "N/A"
     df = df[cols] if cols else df
     
+    st.caption("**Sources**")
     event = st.dataframe(
         df, 
         use_container_width=True, 
@@ -969,6 +970,7 @@ if scan_nc_checked := scan_nc: # check the current widget state
                     df_nc[col] = "N/A"
             df_nc = df_nc[cols] if cols else df_nc
             
+            st.caption("**Sources**")
             event_nc = st.dataframe(
                 df_nc, 
                 use_container_width=True, 
