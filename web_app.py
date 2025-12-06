@@ -587,30 +587,34 @@ def show_source_verification(row_data, schema_dict_local, title):
                                 
                                 for w in words:
                                     padding = 2
+                                    border_thickness = 1  # 2 makes it thicker
                                     
-                                    # 1. Red Border/Tint (Outer Box)
+                                    # Coordinates for the full padded box
+                                    box_x = w["x0"] - padding
+                                    box_y = w["top"] - padding
+                                    box_w = (w["x1"] - w["x0"]) + (2 * padding)
+                                    box_h = (w["bottom"] - w["top"]) + (2 * padding)
+                                    
+                                    # 1. Yellow Background Fill
                                     annotations.append({
                                         "page": page_num,
-                                        "x": w["x0"] - padding,
-                                        "y": w["top"] - padding,
-                                        "width": (w["x1"] - w["x0"]) + (2 * padding),
-                                        "height": (w["bottom"] - w["top"]) + (2 * padding),
-                                        "color": "red",
-                                        "opacity": 0.2
-                                    })
-
-                                    # 2. Yellow Background Fill (Matches Padded Area)
-                                    # Add small epsilon to keys to prevent de-duplication if library uses exact coords as key
-                                    epsilon = 0.01 
-                                    annotations.append({
-                                        "page": page_num,
-                                        "x": w["x0"] - padding + epsilon,
-                                        "y": w["top"] - padding + epsilon,
-                                        "width": (w["x1"] - w["x0"]) + (2 * padding) - (2 * epsilon),
-                                        "height": (w["bottom"] - w["top"]) + (2 * padding) - (2 * epsilon),
+                                        "x": box_x,
+                                        "y": box_y,
+                                        "width": box_w,
+                                        "height": box_h,
                                         "color": "yellow",
                                         "opacity": 0.4
                                     })
+                                    
+                                    # 2. Red Borders (Simulated with 4 thin rectangles)
+                                    # Top
+                                    annotations.append({"page": page_num, "x": box_x, "y": box_y, "width": box_w, "height": border_thickness, "color": "red", "opacity": 1.0})
+                                    # Bottom
+                                    annotations.append({"page": page_num, "x": box_x, "y": box_y + box_h - border_thickness, "width": box_w, "height": border_thickness, "color": "red", "opacity": 1.0})
+                                    # Left
+                                    annotations.append({"page": page_num, "x": box_x, "y": box_y, "width": border_thickness, "height": box_h, "color": "red", "opacity": 1.0})
+                                    # Right
+                                    annotations.append({"page": page_num, "x": box_x + box_w - border_thickness, "y": box_y, "width": border_thickness, "height": box_h, "color": "red", "opacity": 1.0})
                 except Exception as e:
                     st.warning(f"Could not highlight text: {e}")
 
