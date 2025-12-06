@@ -569,8 +569,14 @@ def show_source_verification(row_data, schema_dict_local, title):
                             page = pdf.pages[page_num - 1]
                             # Search for the quote
                             # Use regex to handle potential newline/whitespace differences
-                            clean_quote = re.sub(r'\s+', r'\\s+', re.escape(quote_text.strip()))
+                            clean_quote_str = quote_text.strip()
+                            clean_quote = r'\s+'.join(re.escape(word) for word in clean_quote_str.split())
                             words = page.search(clean_quote, regex=True)
+                            
+                            # Fallback: simple search if regex fails (sometimes safer for exact short matches)
+                            if not words:
+                                words = page.search(clean_quote_str)
+                            
                             if words:
                                 # Start with the first match
                                 # structure: [{'x0': ..., 'top': ..., 'x1': ..., 'bottom': ...}, ...]
