@@ -496,7 +496,7 @@ if scan_nc:
 # --- Main Area: Execution ---
 
 @st.dialog("Source Verification", width="large")
-def show_source_verification(row_data, schema_dict_local, title):
+def show_source_verification(row_data, schema_dict_local, title, initial_field=None):
     st.markdown(f"### {title}")
     
     # Find the uploaded file to display
@@ -520,19 +520,25 @@ def show_source_verification(row_data, schema_dict_local, title):
     with col1:
         st.markdown("#### Extracted Fields")
         # Show fields as selectable pills or radio buttons
-        # Filter out metadata keys like filename
-        field_keys = [k for k in row_data.keys() if k != "filename"]
+        # Filter schema to match keys present in row_data
+        field_options = [k for k in schema_dict_local.keys() if k in row_data]
+        if not field_options:
+             field_options = [k for k in row_data.keys() if k != 'filename']
         
-        # Use a radio button for selection, simpler than pills for now
-        selected_field_key = st.radio(
-            "Select a field to verify:",
-            field_keys,
-            format_func=lambda x: x
+        default_index = 0
+        if initial_field and initial_field in field_options:
+            default_index = field_options.index(initial_field)
+            
+        selection = st.radio(
+            "Select Field:",
+            field_options,
+            index=default_index,
+            key=f"field_selector_{title}"
         )
         
-        if selected_field_key:
+        if selection:
             st.divider()
-            val = row_data[selected_field_key]
+            val = row_data[selection]
             if isinstance(val, dict):
                 ans = val.get("answer", "N/A")
                 quote = val.get("source_quote", "N/A")
@@ -891,19 +897,32 @@ if "rich_results_main" in st.session_state and st.session_state.rich_results_mai
         df, 
         use_container_width=True, 
         on_select="rerun", 
-        selection_mode="single-row",
+        selection_mode=["single-row", "single-column"],
         key="main_table_df"
     )
     
-    current_selection = event.selection.rows
-    history_key = "main_table_df"
-    last_selection = st.session_state.selection_history.get(history_key, [])
+    current_selection_rows = event.selection.rows
+    current_selection_cols = event.selection.columns
     
-    if current_selection != last_selection:
-        st.session_state.selection_history[history_key] = current_selection
-        if current_selection:
-            selected_idx = current_selection[0]
-            pending_dialog_args = (results[selected_idx], st.session_state.get("schema_dict", {}), "Main Extraction")
+    # Only trigger if BOTH row and column are selected (Cell Click)
+    # This prevents the dialog from opening when just the row checkbox is clicked
+    if current_selection_rows and current_selection_cols:
+        selected_idx = current_selection_rows[0]
+        selected_col = current_selection_cols[0]
+        
+        # We don't need history tracking as much for cell clicks because clicking a different cell is a new event
+        # But to prevent infinite reruns if the dialog closes and re-opens, we might want it.
+        # However, st.dialog usually handles state well.
+        # Let's keep it simple: always open if valid cell selection exists.
+        # WAIT: if we re-run, the selection persists. We need to know if it's NEW.
+        
+        history_key = "main_table_df_cell"
+        last_selection = st.session_state.selection_history.get(history_key, (None, None))
+        current_selection_tuple = (selected_idx, selected_col)
+        
+        if current_selection_tuple != last_selection:
+            st.session_state.selection_history[history_key] = current_selection_tuple
+            pending_dialog_args = (results[selected_idx], st.session_state.get("schema_dict", {}), "Main Extraction", selected_col)
 
     # Download Button
     csv = df.to_csv(index=False).encode('utf-8')
@@ -941,22 +960,27 @@ if scan_nc_checked := scan_nc: # check the current widget state
             df_nc = df_nc[cols] if cols else df_nc
             
             event_nc = st.dataframe(
-                df_nc, 
-                use_container_width=True, 
-                on_select="rerun", 
-                selection_mode="single-row",
+                df_nc,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode=["single-row", "single-column"],
                 key=f"nc_table_{key}"
             )
             
-            current_selection_nc = event_nc.selection.rows
-            history_key_nc = f"nc_table_{key}"
-            last_selection_nc = st.session_state.selection_history.get(history_key_nc, [])
+            nc_rows_sel = event_nc.selection.rows
+            nc_cols_sel = event_nc.selection.columns
             
-            if current_selection_nc != last_selection_nc:
-                st.session_state.selection_history[history_key_nc] = current_selection_nc
-                if current_selection_nc:
-                    sel_idx = current_selection_nc[0]
-                    pending_dialog_args = (nc_rows[sel_idx], sec_schema, f"Non-Conformity: {key}")
+            if nc_rows_sel and nc_cols_sel:
+                sel_idx = nc_rows_sel[0]
+                sel_col = nc_cols_sel[0]
+                
+                history_key_nc = f"nc_table_{key}_cell"
+                last_sel_nc = st.session_state.selection_history.get(history_key_nc, (None, None))
+                current_sel_tuple = (sel_idx, sel_col)
+                
+                if current_sel_tuple != last_sel_nc:
+                    st.session_state.selection_history[history_key_nc] = current_sel_tuple
+                    pending_dialog_args = (nc_rows[sel_idx], sec_schema, f"Non-Conformity: {key}", sel_col)
 
             csv_nc = df_nc.to_csv(index=False).encode('utf-8')
             st.download_button(
