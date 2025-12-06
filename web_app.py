@@ -836,6 +836,13 @@ if st.button("🚀 Start Extraction", type="primary"):
 # ==========================================
 
 # 1. Main Results
+# Initialize selection tracking if not present
+if "selection_history" not in st.session_state:
+    st.session_state.selection_history = {}
+
+# Variable to hold arguments for the single dialog we might open
+pending_dialog_args = None
+
 if "rich_results_main" in st.session_state and st.session_state.rich_results_main:
     st.divider()
     st.subheader("3. Extracted Data")
@@ -860,10 +867,15 @@ if "rich_results_main" in st.session_state and st.session_state.rich_results_mai
         key="main_table_df"
     )
     
-    if event.selection.rows:
-        selected_idx = event.selection.rows[0]
-        # Pass the schema dict stored in session
-        show_source_verification(results[selected_idx], st.session_state.get("schema_dict", {}), "Main Extraction")
+    current_selection = event.selection.rows
+    history_key = "main_table_df"
+    last_selection = st.session_state.selection_history.get(history_key, [])
+    
+    if current_selection != last_selection:
+        st.session_state.selection_history[history_key] = current_selection
+        if current_selection:
+            selected_idx = current_selection[0]
+            pending_dialog_args = (results[selected_idx], st.session_state.get("schema_dict", {}), "Main Extraction")
 
     # Download Button
     csv = df.to_csv(index=False).encode('utf-8')
@@ -908,9 +920,15 @@ if scan_nc_checked := scan_nc: # check the current widget state
                 key=f"nc_table_{key}"
             )
             
-            if event_nc.selection.rows:
-                sel_idx = event_nc.selection.rows[0]
-                show_source_verification(nc_rows[sel_idx], sec_schema, f"Non-Conformity: {key}")
+            current_selection_nc = event_nc.selection.rows
+            history_key_nc = f"nc_table_{key}"
+            last_selection_nc = st.session_state.selection_history.get(history_key_nc, [])
+            
+            if current_selection_nc != last_selection_nc:
+                st.session_state.selection_history[history_key_nc] = current_selection_nc
+                if current_selection_nc:
+                    sel_idx = current_selection_nc[0]
+                    pending_dialog_args = (nc_rows[sel_idx], sec_schema, f"Non-Conformity: {key}")
 
             csv_nc = df_nc.to_csv(index=False).encode('utf-8')
             st.download_button(
@@ -919,3 +937,7 @@ if scan_nc_checked := scan_nc: # check the current widget state
                 file_name=section["file_name"],
                 mime="text/csv",
             )
+
+# Final step: Open the dialog if we have a pending request
+if pending_dialog_args:
+    show_source_verification(*pending_dialog_args)
