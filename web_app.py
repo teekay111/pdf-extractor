@@ -231,11 +231,11 @@ NC_SECTIONS = [
         "key": "audit_nc",
         "title": "4.3.1 Non-Conformities Identified during this Audit",
         "instruction_array": (
-            "Focus strictly on Section 4.3.1 'Non-Conformities Identified during this Audit'. "
+            "Focus strictly on Section 4.3.1 'Non-Conformities Identified during this Audit'. Do not include anything from section 4.3.2. "
             "Return a JSON array where each element represents a single non-conformity entry."
         ),
         "instruction_fallback": (
-            "Focus strictly on Section 4.3.1 'Non-Conformities Identified during this Audit'. "
+            "Focus strictly on Section 4.3.1 'Non-Conformities Identified during this Audit'. Do not include anything from section 4.3.2."
             "Return a JSON object with the requested fields. If multiple NCs exist, list them all in order, "
             "combining values within each field separated by ';'."
         ),
@@ -245,11 +245,11 @@ NC_SECTIONS = [
         "key": "previous_nc",
         "title": "4.3.2 Non-Conformities Identified during the last ASA",
         "instruction_array": (
-            "Focus strictly on Section 4.3.2 'Non-Conformity Identified during the last ASA'. "
+            "Focus strictly on Section 4.3.2 'Non-Conformity Identified during the last ASA'. Do not include anything from section 4.3.1. "
             "Return a JSON array where each element represents a single non-conformity entry."
         ),
         "instruction_fallback": (
-            "Focus strictly on Section 4.3.2 'Non-Conformity Identified during the last ASA'. "
+            "Focus strictly on Section 4.3.2 'Non-Conformity Identified during the last ASA'. Do not include anything from section 4.3.1. "
             "Return a JSON object with the requested fields. If multiple NCs exist, list them all in order, "
             "combining values within each field separated by ';'."
         ),
