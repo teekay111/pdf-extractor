@@ -588,18 +588,18 @@ def show_source_verification(row_data, schema_dict_local, title):
                                 for w in words:
                                     padding = 2
                                     
-                                    # 1. Yellow Highlight (Inner Text) - No padding
+                                    # 1. Yellow Background Fill (Matches Padded Area)
                                     annotations.append({
                                         "page": page_num,
-                                        "x": w["x0"],
-                                        "y": w["top"],
-                                        "width": w["x1"] - w["x0"],
-                                        "height": w["bottom"] - w["top"],
+                                        "x": w["x0"] - padding,
+                                        "y": w["top"] - padding,
+                                        "width": (w["x1"] - w["x0"]) + (2 * padding),
+                                        "height": (w["bottom"] - w["top"]) + (2 * padding),
                                         "color": "yellow",
-                                        "opacity": 0.5
+                                        "opacity": 0.4
                                     })
                                     
-                                    # 2. Red Surround (Outer Box) - With padding
+                                    # 2. Red Border/Tint (Outer Box)
                                     annotations.append({
                                         "page": page_num,
                                         "x": w["x0"] - padding,
