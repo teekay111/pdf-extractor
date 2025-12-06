@@ -585,21 +585,9 @@ def show_source_verification(row_data, schema_dict_local, title):
                                 # Each dictionary should have: page, x, y, width, height, color
                                 # Note: pdfplumber gives (x0, top, x1, bottom) where (0,0) is top-left usually.
                                 
-                                for w in words:
                                     padding = 2
                                     
-                                    # 1. Yellow Background Fill (Matches Padded Area)
-                                    annotations.append({
-                                        "page": page_num,
-                                        "x": w["x0"] - padding,
-                                        "y": w["top"] - padding,
-                                        "width": (w["x1"] - w["x0"]) + (2 * padding),
-                                        "height": (w["bottom"] - w["top"]) + (2 * padding),
-                                        "color": "yellow",
-                                        "opacity": 0.4
-                                    })
-                                    
-                                    # 2. Red Border/Tint (Outer Box)
+                                    # 1. Red Border/Tint (Outer Box)
                                     annotations.append({
                                         "page": page_num,
                                         "x": w["x0"] - padding,
@@ -608,6 +596,19 @@ def show_source_verification(row_data, schema_dict_local, title):
                                         "height": (w["bottom"] - w["top"]) + (2 * padding),
                                         "color": "red",
                                         "opacity": 0.2
+                                    })
+
+                                    # 2. Yellow Background Fill (Matches Padded Area)
+                                    # Add small epsilon to keys to prevent de-duplication if library uses exact coords as key
+                                    epsilon = 0.01 
+                                    annotations.append({
+                                        "page": page_num,
+                                        "x": w["x0"] - padding + epsilon,
+                                        "y": w["top"] - padding + epsilon,
+                                        "width": (w["x1"] - w["x0"]) + (2 * padding) - (2 * epsilon),
+                                        "height": (w["bottom"] - w["top"]) + (2 * padding) - (2 * epsilon),
+                                        "color": "yellow",
+                                        "opacity": 0.4
                                     })
                 except Exception as e:
                     st.warning(f"Could not highlight text: {e}")
