@@ -1,6 +1,7 @@
 streamlit
 pandas
-pypdf
 google-generativeai
 pywebview
 pyinstaller
+streamlit-pdf-viewer
+pdfplumber
