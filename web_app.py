@@ -567,16 +567,16 @@ def show_source_verification(row_data, schema_dict_local, title):
                         # pdfplumber pages are 0-indexed, Gemini is 1-indexed
                         if 0 <= page_num - 1 < len(pdf.pages):
                             page = pdf.pages[page_num - 1]
-                            # Search for the quote
-                            # Use regex to handle potential newline/whitespace differences
+                            # Strategy 1: Flexible Regex (Words + Whitespace + Case Insensitive)
                             clean_quote_str = quote_text.strip()
-                            clean_quote = r'\s+'.join(re.escape(word) for word in clean_quote_str.split())
-                            words = page.search(clean_quote, regex=True)
+                            # Escape words but allow flexible whitespace
+                            pattern = r'\s+'.join(re.escape(word) for word in clean_quote_str.split())
+                            words = page.search(pattern, regex=True, case=False)
                             
-                            # Fallback: simple search if regex fails (sometimes safer for exact short matches)
+                            # Strategy 2: Fallback to simple string exact match (Case Insensitive)
                             if not words:
-                                words = page.search(clean_quote_str)
-                            
+                                words = page.search(clean_quote_str, case=False)
+                                
                             if words:
                                 # Start with the first match
                                 # structure: [{'x0': ..., 'top': ..., 'x1': ..., 'bottom': ...}, ...]
